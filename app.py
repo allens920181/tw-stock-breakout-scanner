@@ -377,11 +377,7 @@ with st.sidebar:
         thr_watch = st.number_input("觀察 ≥", 0, 20, int(thr["watch"]))
         thr_weak = st.number_input("偏弱觀察 ≥", 0, 20, int(thr["weak"]))
 
-    with st.expander("回測", expanded=False):
-        bt_lookback = st.number_input("回測天數", 30, 500, 120, 30)
-        bt_hold = st.number_input("持有天數", 3, 60, 10, 1)
-        bt_min_score = st.number_input("最低評分", 0, 20, 5, 1)
-        run_bt_btn = st.button("跑回測", use_container_width=True)
+    st.caption("回測設定請切到「回測」分頁")
 
 
 # =====================================================
@@ -518,61 +514,6 @@ if run_btn:
     finally:
         root.removeHandler(handler)
     bar.progress(1.0, text=f"完成（{result['elapsed_sec']:.1f} 秒）")
-
-
-# =====================================================
-# 執行回測
-# =====================================================
-if run_bt_btn:
-    bt_items = None
-    bt_input = None
-    if mode == "掃描全台股":
-        try:
-            with st.spinner("抓清單 …"):
-                raw = fetch_twse_universe(
-                    include_common=universe_kind in ("twse", "twse-common"),
-                    include_etf=universe_kind in ("twse", "twse-etf"),
-                )
-            bt_items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
-        except Exception as e:
-            st.error(f"抓清單失敗：{e}")
-            st.stop()
-    elif uploaded:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        tmp.write(uploaded.getvalue())
-        tmp.close()
-        bt_input = tmp.name
-    elif use_default and Path("stock_list.xlsx").exists():
-        bt_input = "stock_list.xlsx"
-    else:
-        st.error("請先設定股票來源（左側）")
-        st.stop()
-
-    cfg = build_cfg()
-    bar, log_area, buf, handler = make_progress_block("回測")
-    logging.getLogger().addHandler(handler)
-
-    def bt_progress_cb(stage, pct, msg):
-        bar.progress(min(pct, 1.0), text=f"{stage} — {msg}")
-        log_area.code("\n".join(buf[-30:]) or "（執行中…）")
-
-    try:
-        with st.spinner("回測中 …"):
-            bt_result = run_backtest(
-                bt_input, cfg,
-                lookback_days=int(bt_lookback),
-                hold_days=int(bt_hold),
-                min_score=int(bt_min_score),
-                items=bt_items,
-                progress_cb=bt_progress_cb,
-            )
-        st.session_state["backtest_result"] = bt_result
-    except Exception as e:
-        st.error(f"回測失敗：{e}")
-        st.exception(e)
-    finally:
-        logging.getLogger().removeHandler(handler)
-    bar.progress(1.0, text="回測完成")
 
 
 # =====================================================
@@ -956,8 +897,80 @@ with tab2:
 # Tab 3：回測
 # =====================================================
 with tab3:
+    st.markdown("### 回測設定")
+    st.caption("資料來源、部位管理、評分權重沿用左側設定。")
+
+    bt_c1, bt_c2, bt_c3, bt_c4 = st.columns([1, 1, 1, 1.2])
+    bt_lookback = bt_c1.number_input(
+        "回測天數", 30, 500, 120, 30,
+        help="從今天起回溯多少個交易日逐日驗證",
+    )
+    bt_hold = bt_c2.number_input(
+        "持有天數", 3, 60, 10, 1,
+        help="每筆模擬交易最長持有天數",
+    )
+    bt_min_score = bt_c3.number_input(
+        "最低評分", 0, 20, 5, 1,
+        help="只有評分 ≥ 此值才模擬進場",
+    )
+    bt_c4.markdown("")
+    run_bt_btn = bt_c4.button("跑回測", type="primary", use_container_width=True)
+
+    if run_bt_btn:
+        bt_items = None
+        bt_input = None
+        if mode == "掃描全台股":
+            try:
+                with st.spinner("抓清單 …"):
+                    raw = fetch_twse_universe(
+                        include_common=universe_kind in ("twse", "twse-common"),
+                        include_etf=universe_kind in ("twse", "twse-etf"),
+                    )
+                bt_items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
+            except Exception as e:
+                st.error(f"抓清單失敗：{e}")
+                st.stop()
+        elif uploaded:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            tmp.write(uploaded.getvalue())
+            tmp.close()
+            bt_input = tmp.name
+        elif use_default and Path("stock_list.xlsx").exists():
+            bt_input = "stock_list.xlsx"
+        else:
+            st.error("請先在側欄設定股票來源")
+            st.stop()
+
+        cfg = build_cfg()
+        bar, log_area, buf, handler = make_progress_block("回測")
+        logging.getLogger().addHandler(handler)
+
+        def bt_progress_cb(stage, pct, msg):
+            bar.progress(min(pct, 1.0), text=f"{stage} — {msg}")
+            log_area.code("\n".join(buf[-30:]) or "（執行中…）")
+
+        try:
+            with st.spinner("回測中 …"):
+                bt_result = run_backtest(
+                    bt_input, cfg,
+                    lookback_days=int(bt_lookback),
+                    hold_days=int(bt_hold),
+                    min_score=int(bt_min_score),
+                    items=bt_items,
+                    progress_cb=bt_progress_cb,
+                )
+            st.session_state["backtest_result"] = bt_result
+        except Exception as e:
+            st.error(f"回測失敗：{e}")
+            st.exception(e)
+        finally:
+            logging.getLogger().removeHandler(handler)
+        bar.progress(1.0, text="回測完成")
+
+    st.divider()
+
     if "backtest_result" not in st.session_state:
-        st.info("從側欄展開「**回測**」設定後點「**跑回測**」")
+        st.info("設定好參數後點「**跑回測**」")
     else:
         bt = st.session_state["backtest_result"]
         s = bt["summary"]
