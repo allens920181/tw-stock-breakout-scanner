@@ -12,6 +12,7 @@ from .fetcher import (
 )
 from .backtest import backtest_symbol, summarize_trades
 from .holdings import analyze_holding, load_holdings
+from .macro import classify_us_market, merge_position_factor
 from .market import classify_market
 from .report import build_dataframes
 from .scoring import analyze_stock
@@ -59,12 +60,26 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     emit("抓股數", 0.78, "完成")
 
     market_state = None
+    us_state = None
     if cfg.get("market_filter", {}).get("enabled", True):
-        emit("大盤判斷", 0.80, "抓 ^TWII 判斷大盤狀態")
+        emit("大盤判斷", 0.79, "抓 ^TWII 判斷台股大盤")
         market_state = classify_market(
             cfg["data"]["period"], cfg["data"]["cache_dir"],
         )
-        emit("大盤判斷", 0.81, f"{market_state['label']} — {market_state['detail']}")
+        emit("大盤判斷", 0.80, f"台股 {market_state['label']} — {market_state['detail']}")
+
+        emit("大盤判斷", 0.80, "抓 ^VIX / ^GSPC 判斷美股風險偏好")
+        us_state = classify_us_market(
+            period="1y", cache_dir=cfg["data"]["cache_dir"],
+        )
+        emit("大盤判斷", 0.81,
+             f"美股 {us_state['label']} — {us_state['detail']}")
+
+        # 合併雙因子：取較保守者
+        combined_factor = merge_position_factor(market_state, us_state)
+        if market_state:
+            market_state["position_factor"] = combined_factor
+            market_state["us_state"] = us_state
 
     emit("分析", 0.82, f"逐檔分析 {len(resolved)} 檔")
     results = []

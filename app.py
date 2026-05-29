@@ -20,6 +20,7 @@ from src.config import load_config
 from src.fetcher import fix_stock_code
 from src.glossary import HELP
 from src.history import cleanup_old, list_scans, load_scan_df, save_scan
+from src.macro import classify_us_market
 from src.market import classify_market
 from src.name_lookup import lookup_names
 from src.preferences import load_prefs, save_prefs
@@ -120,6 +121,7 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .hdr-right {
     display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
 }
+.hdr-chips { display: flex; gap: 6px; }
 .hdr-status {
     display: flex; align-items: center; gap: 6px;
     font-size: 0.85rem; color: var(--text);
@@ -320,6 +322,12 @@ def get_base_config():
 def get_market_state_cached():
     cfg = get_base_config()
     return classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
+
+
+@st.cache_data(ttl=1800)
+def get_us_state_cached():
+    cfg = get_base_config()
+    return classify_us_market("1y", cfg["data"]["cache_dir"])
 
 
 @st.cache_data(ttl=86400)
@@ -648,29 +656,44 @@ def make_progress_block(title):
     return bar, log_area, buf, handler
 
 
-def render_header(market_state, last_scan_at=None):
-    """整合的 header：左側標題，右側大盤狀態 + 日期/上次掃描"""
+def _chip_cls(regime):
+    return {
+        "bull": "bull", "bear": "bear", "neutral": "neutral",
+        "risk_on": "bull", "risk_off": "bear",
+    }.get(regime, "unknown")
+
+
+def render_header(market_state, last_scan_at=None, us_state=None):
+    """整合的 header：左側標題，右側大盤雙 chip + 日期/上次掃描"""
     date_str = pd.Timestamp.today().strftime('%Y / %m / %d  %A')
+    chips = []
 
     if market_state:
-        regime = market_state["regime"]
-        cls = {"bull": "bull", "bear": "bear", "neutral": "neutral"}.get(regime, "unknown")
+        cls = _chip_cls(market_state["regime"])
         label = market_state["label"]
         for sym in ["🟢", "🔴", "🟡", "⚪"]:
             label = label.replace(sym, "")
         label = label.strip()
-        detail = market_state.get("detail", "")
-        status_html = (
-            f"<div class='hdr-status {cls}'>"
+        tw_detail = market_state.get("detail", "")
+        chips.append(
+            f"<div class='hdr-status {cls}' title='{tw_detail}'>"
             f"<span class='dot'></span>"
-            f"<b>大盤 {label}</b>"
-            f"<span class='sep'>·</span>"
-            f"<span class='hdr-detail'>{detail}</span>"
+            f"<b>台股 {label}</b>"
             f"</div>"
         )
-    else:
-        status_html = ""
 
+    if us_state:
+        cls = _chip_cls(us_state["regime"])
+        label = us_state["label"]
+        us_detail = us_state.get("detail", "")
+        chips.append(
+            f"<div class='hdr-status {cls}' title='{us_detail}'>"
+            f"<span class='dot'></span>"
+            f"<b>美股 {label}</b>"
+            f"</div>"
+        )
+
+    status_html = "<div class='hdr-chips'>" + "".join(chips) + "</div>" if chips else ""
     last = f"<span class='sep'>·</span>上次掃描 {last_scan_at}" if last_scan_at else ""
 
     st.markdown(
@@ -991,14 +1014,22 @@ def show_detail_dialog(row, ohlc_map):
 # =====================================================
 last_scan_at = st.session_state.get("last_scan_at")
 market_state = None
+us_state = None
 if "result" in st.session_state:
     market_state = st.session_state["result"].get("market_state")
+    if market_state:
+        us_state = market_state.get("us_state")
 if market_state is None:
     try:
         market_state = get_market_state_cached()
     except Exception:
         market_state = None
-render_header(market_state, last_scan_at)
+if us_state is None:
+    try:
+        us_state = get_us_state_cached()
+    except Exception:
+        us_state = None
+render_header(market_state, last_scan_at, us_state=us_state)
 
 
 # =====================================================
