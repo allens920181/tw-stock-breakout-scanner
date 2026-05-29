@@ -1,6 +1,8 @@
 import pandas as pd
 
+from .entry import classify_entry
 from .indicators import add_indicators
+from .sizing import calc_position, calc_targets
 
 
 def _empty_result(symbol, name, market, status):
@@ -11,7 +13,7 @@ def _empty_result(symbol, name, market, status):
     }
 
 
-def analyze_stock(symbol, company_name, market, df, shares, cfg):
+def analyze_stock(symbol, company_name, market, df, shares, cfg, market_state=None):
     """
     依 config 進行品質過濾 + 加權評分。
     回傳 dict（一筆結果）。
@@ -83,13 +85,33 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg):
     risk = entry - stop
     risk_pct = risk / entry if entry > 0 else 0
 
+    target_1r, target_2r = calc_targets(entry, stop)
+
     min_risk_pct = filters.get("min_risk_pct", 0)
-    if risk > 0 and risk_pct >= min_risk_pct:
-        target = entry + 2 * risk
-        rr = (target - entry) / risk
+    risk_ok = risk > 0 and risk_pct >= min_risk_pct
+
+    if risk_ok:
+        rr = 2.0  # 固定吃 2R
     else:
-        target = None
         rr = None
+
+    # ============ 進場分類 ============
+    entry_info = classify_entry(df, latest, high_20, vol20)
+
+    # ============ 大盤調整 ============
+    position_factor = market_state["position_factor"] if market_state else 1.0
+    market_label = market_state["label"] if market_state else "⚪"
+
+    # ============ 部位管理 ============
+    ps = cfg.get("position_sizing", {})
+    pos = calc_position(
+        entry=entry, stop=stop,
+        total_capital=ps.get("total_capital", 1_000_000),
+        risk_pct=ps.get("risk_per_trade_pct", 0.01),
+        position_factor=position_factor,
+        lot_size=ps.get("lot_size", 1000),
+        max_position_pct=ps.get("max_position_pct", 0.20),
+    )
 
     # 停損距離不合理 → 訊號降級為觀察
     if rr is None and score >= thr["strong"]:
@@ -106,17 +128,42 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg):
             signal = "不符合"
         status = "成功"
 
+    # ============ 綜合操作建議 ============
+    if market_state and market_state["regime"] == "bear":
+        action = "⛔ 大盤空頭 暫不買入"
+    elif pos["suggested_lots"] == 0:
+        action = "⚠️ 不足 1 張 跳過"
+    elif signal == "強勢候選" and entry_info["entry_type"] in ("breakout", "pullback", "base"):
+        action = f"🟢 買入（{entry_info['entry_label']}）"
+    elif signal == "強勢候選":
+        action = "🟡 強勢但無明確進場點"
+    elif signal == "觀察":
+        action = "🟡 觀察"
+    else:
+        action = "🔴 不操作"
+
     return {
         "股票": symbol, "公司名稱": company_name, "市場": market,
         "狀態": status, "訊號判斷": signal, "評分": score,
 
+        "操作建議": action,
+        "進場類型": entry_info["entry_label"],
+        "進場條件": entry_info["entry_note"],
+
         "收盤價": round(entry, 2),
-        "進場參考價": round(entry, 2),
+        "進場參考價": entry_info["entry_price"],
         "停損價": round(stop, 2),
-        "目標價": round(target, 2) if target is not None else None,
+        "目標價1(+1R半倉)": target_1r,
+        "目標價2(+2R出清)": target_2r,
         "風險": round(risk, 2),
         "風險%": round(risk_pct * 100, 2),
         "RR比": round(rr, 2) if rr is not None else None,
+
+        "建議張數": pos["suggested_lots"],
+        "進場成本": pos["cost"],
+        "佔資金%": pos["cost_pct"],
+        "部位提示": pos["warning"],
+        "大盤狀態": market_label,
 
         "MA5": round(latest["MA5"], 2),
         "MA20": round(latest["MA20"], 2),

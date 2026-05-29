@@ -4,7 +4,7 @@ import sys
 
 from src.config import load_config
 from src.report import write_excel
-from src.runner import run_scan
+from src.runner import run_backtest, run_scan
 from src.universe import fetch_twse_universe
 
 
@@ -27,6 +27,11 @@ def parse_args():
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--log-file", default=None)
+
+    p.add_argument("--backtest", action="store_true",
+                   help="走 walk-forward 回測，不做即時掃描")
+    p.add_argument("--lookback-days", type=int, default=120)
+    p.add_argument("--hold-days", type=int, default=10)
     return p.parse_args()
 
 
@@ -35,6 +40,41 @@ def main():
     setup_logging(args.log_level, args.log_file)
 
     cfg = load_config(args.config)
+
+    if args.backtest:
+        items = None
+        if args.universe:
+            include_common = args.universe in ("twse", "twse-common")
+            include_etf = args.universe in ("twse", "twse-etf")
+            uni = fetch_twse_universe(include_common, include_etf)
+            items = [{"code": x["code"], "company_name": x["company_name"]} for x in uni]
+        bt = run_backtest(
+            args.input, cfg,
+            lookback_days=args.lookback_days,
+            hold_days=args.hold_days,
+            min_score=args.min_score,
+            items=items,
+        )
+        log_main = logging.getLogger("main")
+        log_main.info("=== 回測摘要 ===")
+        for k, v in bt["summary"].items():
+            log_main.info("  %s: %s", k, v)
+
+        import os
+        from datetime import datetime
+        out_dir = cfg["output"]["dir"]
+        os.makedirs(out_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(out_dir, f"回測報告_{ts}.xlsx")
+        import pandas as pd
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            pd.DataFrame([bt["summary"]]).to_excel(writer, sheet_name="摘要", index=False)
+            if len(bt["trades"]):
+                bt["trades"].to_excel(writer, sheet_name="交易明細", index=False)
+            if len(bt["by_symbol"]):
+                bt["by_symbol"].to_excel(writer, sheet_name="個股統計", index=False)
+        log_main.info("回測報告已輸出：%s", path)
+        return
 
     if args.universe:
         include_common = args.universe in ("twse", "twse-common")

@@ -7,8 +7,11 @@
 - 批次下載 + 平行抓股數 + Parquet 本地快取
 - 加權評分（突破+量增、MA 多頭、換手率強勢、KD、MACD）
 - 品質前置過濾（最低股價、流動性、MA60 趨勢、停損距離）
-- 評分分級：強勢候選 / 觀察 / 偏弱觀察 / 不符合
-- 自動計算進場價、停損價、目標價、RR 比
+- **大盤狀態判斷**（^TWII regime）自動調整部位
+- **進場類型分類**：突破 / 拉回 / 區間突破
+- **部位管理**：固定風險法，自動計算建議買入張數
+- **持股管理**：上傳持股 Excel，輸出個股賣出建議（停損/+1R 半倉/+2R 出清/時間停損/移動停利）
+- **Walk-forward 回測**：勝率 / 平均 R / 期望值 / 最大回撤
 - 全參數由 `config.yaml` 控制
 
 ## 安裝
@@ -41,6 +44,10 @@ uv run python main.py --universe twse
 
 # 僅 ETF
 uv run python main.py --universe twse-etf
+
+# 回測（過去 120 日 walk-forward，持有 10 日）
+uv run python main.py --backtest --lookback-days 120 --hold-days 10
+uv run python main.py --backtest --universe twse --min-score 6
 ```
 
 ## 掃描全台股

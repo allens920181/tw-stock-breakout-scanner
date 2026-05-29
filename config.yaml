@@ -37,6 +37,18 @@ etf_fix_map:
   "9819": "009819"
   "920": "00920"
 
+# 部位管理
+position_sizing:
+  total_capital: 1000000     # 總資金（元）
+  risk_per_trade_pct: 0.01   # 單筆風險比例（1%）
+  lot_size: 1000             # 1 張 = 1000 股
+  max_position_pct: 0.20     # 單檔最大佔比 20%
+
+# 大盤過濾（不關掉、只調整部位）
+market_filter:
+  enabled: true
+  symbol: "^TWII"
+
 output:
   dir: "."
   prefix: "台股全部分析報告_自動判斷市場"

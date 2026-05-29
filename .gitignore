@@ -15,6 +15,7 @@ venv/
 台股全部分析報告_*.xlsx
 *.xlsx
 !stock_list.example.xlsx
+!holdings.example.xlsx
 
 # IDE
 .vscode/
