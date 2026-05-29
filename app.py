@@ -147,6 +147,38 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
     box-shadow: none !important;
 }
 
+/* 大幅壓縮卡片內部垂直間距 */
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-testid="stMetric"]) {
+    padding: 10px 14px 8px 14px !important;
+}
+/* metric 內部 label/value 間距收緊 */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricLabel"] {
+    margin-bottom: 0 !important; padding-bottom: 0 !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricLabel"] p {
+    margin: 0 !important; font-size: 0.72rem !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricValue"] {
+    margin: 0 !important; padding: 0 !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricValue"] div {
+    line-height: 1.2 !important;
+}
+/* 卡片內各 row 之間（標題 → metric → caption）的間距收緊 */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stVerticalBlock"] {
+    gap: 4px !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {
+    gap: 6px !important;
+}
+/* 卡片內 caption（17.3% 資金 / 偏冷 / 已限縮至…）緊貼上方 */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCaptionContainer"] {
+    margin-top: -4px !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCaptionContainer"] p {
+    margin: 0 !important; line-height: 1.2 !important; font-size: 0.72rem !important;
+}
+
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
     font-size: 0.95rem !important; font-weight: 500 !important;
