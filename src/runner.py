@@ -117,7 +117,7 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
     """
     掃描持股賣出建議。
     holdings_path: 從 Excel 讀；或
-    holdings: 直接傳 list[{code, company_name, entry_price, entry_date, lots}]
+    holdings: 直接傳 list[{code, company_name, entry_price, entry_date, shares}]
     """
     def emit(stage, pct, msg):
         log.info("[%s] %s", stage, msg)
@@ -147,6 +147,14 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
 
     rows = []
     for h in holdings:
+        # 兼容舊 key "lots" 與新 key "shares"（舊 lots × 1000 = shares）
+        shares_val = h.get("shares")
+        if shares_val is None and h.get("lots") is not None:
+            try:
+                shares_val = int(h["lots"]) * 1000
+            except Exception:
+                shares_val = h.get("lots")
+
         r = code_to_resolved.get(h["code"])
         if r is None:
             rows.append({
@@ -154,14 +162,14 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
                 "進場日": str(h["entry_date"]) if h["entry_date"] else None,
                 "持有天數": None, "進場價": h["entry_price"],
                 "目前價": None, "報酬%": None, "R倍數": None,
-                "持有張數": h["lots"],
-                "操作建議": "❓ 找不到資料", "賣出張數": "—",
+                "持有股數": shares_val,
+                "操作建議": "找不到資料", "賣出量": "—",
                 "說明": "市場未定位", "狀態": "找不到",
             })
             continue
         row = analyze_holding(
             r["symbol"], r["company_name"] or h["company_name"], r["market"],
-            r["df"], h["entry_price"], h["entry_date"], h["lots"],
+            r["df"], h["entry_price"], h["entry_date"], shares_val,
         )
         rows.append(row)
 

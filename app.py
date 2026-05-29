@@ -1213,8 +1213,8 @@ with tab2:
     # ============ 初始化 ============
     if "holdings_df" not in st.session_state:
         st.session_state["holdings_df"] = pd.DataFrame([
-            {"股票代號": "2330", "公司名稱": "台積電", "進場價": 0.0,
-             "進場日": pd.Timestamp.today().normalize(), "持有張數": 1},
+            {"股票代號": "2330", "公司名稱": "台積電", "進場價": 0.00,
+             "進場日": pd.Timestamp.today().normalize(), "持有股數": 1000},
         ])
 
     holdings_df_curr = st.session_state["holdings_df"]
@@ -1227,11 +1227,11 @@ with tab2:
 
     # ============ 統計：成本 / 現值 / 損益 ============
     total_cost = 0.0
-    if len(valid_h) and "進場價" in valid_h.columns and "持有張數" in valid_h.columns:
+    if len(valid_h) and "進場價" in valid_h.columns and "持有股數" in valid_h.columns:
         try:
             cost_series = (
                 valid_h["進場價"].fillna(0).astype(float)
-                * valid_h["持有張數"].fillna(0).astype(float) * 1000
+                * valid_h["持有股數"].fillna(0).astype(float)
             )
             total_cost = float(cost_series.sum())
         except Exception:
@@ -1256,10 +1256,10 @@ with tab2:
             cur = code_to_current.get(code)
             if cur is None:
                 continue
-            lots = row.get("持有張數")
-            if lots is None or pd.isna(lots):
+            shares = row.get("持有股數")
+            if shares is None or pd.isna(shares):
                 continue
-            total_value += cur * float(lots) * 1000
+            total_value += cur * float(shares)
         total_pnl = total_value - total_cost
         total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
 
@@ -1286,7 +1286,7 @@ with tab2:
         tt = st.columns(3)
         if tt[0].button("清空", use_container_width=True):
             st.session_state["holdings_df"] = pd.DataFrame(columns=[
-                "股票代號", "公司名稱", "進場價", "進場日", "持有張數",
+                "股票代號", "公司名稱", "進場價", "進場日", "持有股數",
             ])
             st.session_state.pop("holdings_result", None)
             st.rerun()
@@ -1331,13 +1331,14 @@ with tab2:
                     help="留空會自動查詢",
                 ),
                 "進場價": st.column_config.NumberColumn(
-                    "進場價", min_value=0.0, step=0.5, format="%.2f", width="small",
+                    "進場價", min_value=0.0, step=0.01, format="%.2f", width="small",
                 ),
                 "進場日": st.column_config.DateColumn(
                     "進場日", format="YYYY-MM-DD", width="small",
                 ),
-                "持有張數": st.column_config.NumberColumn(
-                    "持有張數", min_value=0, step=1, format="%d", width="small",
+                "持有股數": st.column_config.NumberColumn(
+                    "持有股數", min_value=0, step=100, format="%d", width="small",
+                    help="1 張 = 1000 股",
                 ),
             },
             key="holdings_editor",
@@ -1395,12 +1396,13 @@ with tab2:
             ed = row["進場日"]
             if isinstance(ed, pd.Timestamp):
                 ed = ed.date()
+            shares_val = int(row["持有股數"]) if pd.notna(row.get("持有股數")) else None
             holdings_list.append({
                 "code": code,
                 "company_name": str(row.get("公司名稱", "")).strip(),
                 "entry_price": float(row["進場價"]) if pd.notna(row.get("進場價")) else 0,
                 "entry_date": ed,
-                "lots": int(row["持有張數"]) if pd.notna(row.get("持有張數")) else None,
+                "shares": shares_val,
             })
 
         bar, log_area, buf, handler = make_progress_block("持股分析")

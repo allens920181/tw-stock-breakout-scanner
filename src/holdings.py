@@ -2,7 +2,7 @@
 持股管理：對持有部位產生賣出建議
 
 holdings.xlsx 欄位：
-  股票代號 | 公司名稱(可空) | 進場價 | 進場日(YYYY-MM-DD) | 持有張數(可空)
+  股票代號 | 公司名稱(可空) | 進場價 | 進場日(YYYY-MM-DD) | 持有股數(可空)
 """
 import logging
 from datetime import datetime
@@ -34,28 +34,34 @@ def load_holdings(file_path, etf_fix_map):
                 entry_date = pd.to_datetime(entry_date).date()
             except Exception:
                 entry_date = None
+        # 支援新欄名「持有股數」與舊欄名「持有張數」（張數 × 1000 = 股數）
+        shares_val = None
+        if "持有股數" in row and pd.notna(row.get("持有股數")):
+            shares_val = int(row["持有股數"])
+        elif "持有張數" in row and pd.notna(row.get("持有張數")):
+            shares_val = int(row["持有張數"]) * 1000
         items.append({
             "code": code,
             "company_name": str(row.get("公司名稱", "")).strip(),
             "entry_price": entry_price,
             "entry_date": entry_date,
-            "lots": int(row["持有張數"]) if "持有張數" in row and pd.notna(row.get("持有張數")) else None,
+            "shares": shares_val,
         })
     return items
 
 
-def analyze_holding(symbol, name, market, df, entry_price, entry_date, lots=None,
+def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
                     time_stop_days=10, profit_taking_at_1r=True):
     """
     產生持股賣出建議。
     """
     if df is None or df.empty or len(df) < 60:
-        return _row(symbol, name, market, entry_price, entry_date, lots,
+        return _row(symbol, name, market, entry_price, entry_date, shares,
                     None, None, None, None, "資料不足", "保留", "")
 
     df = add_indicators(df).dropna()
     if len(df) < 5:
-        return _row(symbol, name, market, entry_price, entry_date, lots,
+        return _row(symbol, name, market, entry_price, entry_date, shares,
                     None, None, None, None, "指標資料不足", "保留", "")
 
     latest = df.iloc[-1]
@@ -117,11 +123,11 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, lots=None
         actions.append(("✅ 續抱", "保留", f"未觸發出場條件 報酬 {profit_pct:.1f}%"))
 
     label, qty, note = actions[0]
-    return _row(symbol, name, market, entry_price, entry_date, lots,
+    return _row(symbol, name, market, entry_price, entry_date, shares,
                 close, profit_pct, r_multiple, held_days, "成功", label, note, qty)
 
 
-def _row(symbol, name, market, entry_price, entry_date, lots,
+def _row(symbol, name, market, entry_price, entry_date, shares,
          close, profit_pct, r_mult, held_days, status, action, note, qty="—"):
     return {
         "股票": symbol,
@@ -133,9 +139,9 @@ def _row(symbol, name, market, entry_price, entry_date, lots,
         "目前價": round(close, 2) if close is not None else None,
         "報酬%": round(profit_pct, 2) if profit_pct is not None else None,
         "R倍數": round(r_mult, 2) if r_mult is not None else None,
-        "持有張數": lots,
+        "持有股數": shares,
         "操作建議": action,
-        "賣出張數": qty,
+        "賣出量": qty,
         "說明": note,
         "狀態": status,
     }
