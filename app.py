@@ -172,6 +172,30 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
     margin-left: 4px; font-variant-numeric: tabular-nums;
 }
 
+/* Sidebar file uploader 緊湊化 */
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+    padding: 8px 12px !important;
+    min-height: 0 !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small {
+    display: none !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] svg {
+    width: 18px !important; height: 18px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] > div {
+    gap: 8px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] span {
+    font-size: 0.8rem !important;
+}
+
+/* segmented control 緊湊 */
+[data-testid="stSidebar"] [data-testid="stSegmentedControl"] button {
+    font-size: 0.82rem !important;
+    padding: 4px 10px !important;
+}
+
 /* 持股 alert banner */
 .holdings-alert {
     background: var(--negative-2);
@@ -378,25 +402,40 @@ with st.sidebar:
             apply_preset(key)
             st.rerun()
 
-    st.markdown("### 設定")
+    st.markdown("### 資料來源")
 
-    mode = st.radio(
+    source_options = {
+        "default": "專案清單",
+        "upload": "上傳",
+        "universe": "全台股",
+    }
+    source = st.segmented_control(
         "資料來源",
-        ["上傳清單", "掃描全台股"],
-        horizontal=True,
+        options=list(source_options.keys()),
+        format_func=lambda k: source_options[k],
+        default="default",
+        label_visibility="collapsed",
     )
 
     uploaded = None
     use_default = False
     universe_kind = "twse"
+    # 為向後相容（其他地方仍用 mode 變數判斷）
+    mode = "掃描全台股" if source == "universe" else "上傳清單"
 
-    if mode == "上傳清單":
-        uploaded = st.file_uploader("上傳股票清單 (xlsx)", type=["xlsx"])
-        use_default = st.checkbox(
-            "使用專案內 stock_list.xlsx",
-            value=not uploaded, disabled=bool(uploaded),
+    if source == "default":
+        if Path("stock_list.xlsx").exists():
+            st.caption("使用 `stock_list.xlsx`")
+            use_default = True
+        else:
+            st.warning("找不到 stock_list.xlsx — 改選上傳或全台股")
+    elif source == "upload":
+        uploaded = st.file_uploader(
+            "上傳 xlsx", type=["xlsx"], label_visibility="collapsed",
         )
-    else:
+        if not uploaded:
+            st.caption("欄位需含：股票代號 / 公司名稱")
+    else:  # universe
         universe_kind = st.selectbox(
             "範圍",
             ["twse", "twse-common", "twse-etf"],
@@ -405,6 +444,7 @@ with st.sidebar:
                 "twse-common": "僅普通股",
                 "twse-etf": "僅 ETF",
             }[x],
+            label_visibility="collapsed",
         )
         st.caption("首次 5–15 分鐘；同日重跑 < 1 分鐘")
 
