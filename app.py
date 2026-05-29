@@ -1160,23 +1160,28 @@ def render_results_table(df, key_prefix=""):
     if "進場成本" in display.columns:
         col_cfg["進場成本"] = st.column_config.NumberColumn("進場成本", format="%d")
 
-    # 訊號燈號（列底色）
+    # 訊號燈號（列底色）— 用「操作建議」分類，永遠存在於 display
     def _row_style(row):
-        sig = row.get("訊號判斷", "")
-        # 進場：淺綠；觀察：淺橙；不操作 / 其他：無
-        if sig == "進場":
-            return ["background-color: #ECFDF5"] * len(row)
-        if sig == "觀察":
+        action = str(row.get("操作建議", ""))
+        cls = _action_class(action)
+        if cls == "go":
+            return ["background-color: #DCFCE7"] * len(row)
+        if cls == "watch":
             return ["background-color: #FEF3C7"] * len(row)
         return [""] * len(row)
+
+    # column_config 的 ProgressColumn 會接管 cell 渲染導致 Styler 失效，
+    # 同時使用 Styler 時改用純 NumberColumn 顯示評分
+    col_cfg_styled = {k: v for k, v in col_cfg.items() if k != "評分"}
 
     try:
         styled = display.style.apply(_row_style, axis=1)
         st.dataframe(
             styled, use_container_width=True, height=500,
-            column_config=col_cfg, hide_index=True,
+            column_config=col_cfg_styled, hide_index=True,
         )
-    except Exception:
+    except Exception as e:
+        st.warning(f"列底色失效：{e}")
         st.dataframe(
             display, use_container_width=True, height=500,
             column_config=col_cfg, hide_index=True,
