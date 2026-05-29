@@ -1314,57 +1314,61 @@ with tab2:
                 except Exception as e:
                     st.error(f"讀取失敗：{e}")
 
-    # ============ 編輯器 ============
-    edited = st.data_editor(
-        st.session_state["holdings_df"],
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "股票代號": st.column_config.TextColumn(
-                "股票代號", required=True, width="small",
-                help="例：2330。輸入後公司名稱自動帶入",
-            ),
-            "公司名稱": st.column_config.TextColumn(
-                "公司名稱", width="medium",
-                help="留空會自動查詢",
-            ),
-            "進場價": st.column_config.NumberColumn(
-                "進場價", min_value=0.0, step=0.5, format="%.2f", width="small",
-            ),
-            "進場日": st.column_config.DateColumn(
-                "進場日", format="YYYY-MM-DD", width="small",
-            ),
-            "持有張數": st.column_config.NumberColumn(
-                "持有張數", min_value=0, step=1, format="%d", width="small",
-            ),
-        },
-        key="holdings_editor",
-    )
+    # ============ 編輯器（fragment 隔離 rerun）============
+    @st.fragment
+    def holdings_editor_fragment():
+        edited = st.data_editor(
+            st.session_state["holdings_df"],
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "股票代號": st.column_config.TextColumn(
+                    "股票代號", required=True, width="small",
+                    help="例：2330。輸入後公司名稱自動帶入",
+                ),
+                "公司名稱": st.column_config.TextColumn(
+                    "公司名稱", width="medium",
+                    help="留空會自動查詢",
+                ),
+                "進場價": st.column_config.NumberColumn(
+                    "進場價", min_value=0.0, step=0.5, format="%.2f", width="small",
+                ),
+                "進場日": st.column_config.DateColumn(
+                    "進場日", format="YYYY-MM-DD", width="small",
+                ),
+                "持有張數": st.column_config.NumberColumn(
+                    "持有張數", min_value=0, step=1, format="%d", width="small",
+                ),
+            },
+            key="holdings_editor",
+        )
 
-    # 自動帶入名稱
-    if len(edited) and "股票代號" in edited.columns:
-        code_map = get_code_name_map()
-        changed = False
-        edited = edited.copy()
-        for i, row in edited.iterrows():
-            code_raw = row.get("股票代號")
-            if code_raw is None or pd.isna(code_raw):
-                continue
-            code = fix_stock_code(code_raw, base_cfg.get("etf_fix_map", {}))
-            if not code:
-                continue
-            current_name = row.get("公司名稱")
-            if (current_name is None or pd.isna(current_name)
-                    or str(current_name).strip() == ""):
-                name = code_map.get(code)
-                if name:
-                    edited.at[i, "公司名稱"] = name
-                    changed = True
-        st.session_state["holdings_df"] = edited
-        if changed:
-            st.rerun()
-    else:
-        st.session_state["holdings_df"] = edited
+        # 自動帶入名稱（rerun 只重畫 fragment，不動到頁首/KPI/sidebar）
+        if len(edited) and "股票代號" in edited.columns:
+            code_map = get_code_name_map()
+            changed = False
+            edited = edited.copy()
+            for i, row in edited.iterrows():
+                code_raw = row.get("股票代號")
+                if code_raw is None or pd.isna(code_raw):
+                    continue
+                code = fix_stock_code(code_raw, base_cfg.get("etf_fix_map", {}))
+                if not code:
+                    continue
+                current_name = row.get("公司名稱")
+                if (current_name is None or pd.isna(current_name)
+                        or str(current_name).strip() == ""):
+                    name = code_map.get(code)
+                    if name:
+                        edited.at[i, "公司名稱"] = name
+                        changed = True
+            st.session_state["holdings_df"] = edited
+            if changed:
+                st.rerun(scope="fragment")
+        else:
+            st.session_state["holdings_df"] = edited
+
+    holdings_editor_fragment()
 
     # ============ 分析按鈕 ============
     st.markdown("")
