@@ -1,6 +1,6 @@
 [project]
 name = "tw-stock-breakout-scanner"
-version = "0.1.0"
+version = "0.2.0"
 description = "台股強勢突破交易清單掃描器（換手率版）"
 requires-python = ">=3.10"
 dependencies = [
@@ -8,4 +8,14 @@ dependencies = [
     "pandas>=2.0",
     "openpyxl>=3.1",
     "pyarrow>=15.0",
+    "pyyaml>=6.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,40 @@
+# =====================================================
+# 台股強勢突破交易清單 設定檔
+# =====================================================
+
+data:
+  period: "1y"           # yfinance 下載期間
+  cache_dir: ".cache"
+  max_workers: 8         # 平行抓股數的執行緒數
+
+# 品質前置過濾（不符合直接歸類「不分析」）
+filters:
+  min_price: 10              # 最低股價（過濾雞蛋水餃股）
+  min_avg_volume: 500000     # 20 日均量下限（股；500 張 = 500,000 股）
+  require_above_ma60: true   # 必須站上 MA60（過濾下降趨勢）
+  min_risk_pct: 0.02         # 停損距離 / 進場價 須 ≥ 2%（避免 RR 虛胖）
+
+# 加權評分（總分 8）
+scoring:
+  weights:
+    breakout_with_volume: 2  # 突破 20 日高 + 量增 1.2 倍（合併必須同時成立）
+    ma_bullish: 2            # MA5>MA20>MA60 且 Close>MA20
+    turnover_strong: 2       # 換手率 > 1% 且 > 20 日平均換手率
+    kd: 1                    # K > D 且 K > 70
+    macd: 1                  # OSC > 0
+  thresholds:
+    strong: 6   # ≥ 6 強勢候選
+    watch: 5    # ≥ 5 觀察
+    weak: 4     # ≥ 4 偏弱觀察
+
+# ETF 代號修正表（yfinance 接受的格式）
+etf_fix_map:
+  "9805": "009805"
+  "899": "00899"
+  "902": "00902"
+  "9819": "009819"
+  "920": "00920"
+
+output:
+  dir: "."
+  prefix: "台股全部分析報告_自動判斷市場"
