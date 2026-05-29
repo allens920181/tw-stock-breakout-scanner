@@ -1,0 +1,11 @@
+[project]
+name = "tw-stock-breakout-scanner"
+version = "0.1.0"
+description = "台股強勢突破交易清單掃描器（換手率版）"
+requires-python = ">=3.10"
+dependencies = [
+    "yfinance>=0.2.40",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "pyarrow>=15.0",
+]

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# uv
+.python-version
+
+# Cache
+.cache/
+
+# Output
+台股全部分析報告_*.xlsx
+*.xlsx
+!stock_list.example.xlsx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
