@@ -15,6 +15,7 @@ from .holdings import analyze_holding, load_holdings
 from .market import classify_market
 from .report import build_dataframes
 from .scoring import analyze_stock
+from .sensitivity import sensitivity_scan
 
 log = logging.getLogger(__name__)
 
@@ -243,4 +244,20 @@ def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
         "trades": trades_df,
         "summary": summary,
         "by_symbol": by_symbol_df,
+        "resolved": resolved,
     }
+
+
+def run_sensitivity(resolved, cfg, score_range, lookback_days, hold_days,
+                    progress_cb=None):
+    """跑多個 min_score 比較 edge。要先有 resolved（建議從 run_backtest 結果拿）"""
+    def step_cb(i, total, sc):
+        log.info("敏感度 %d/%d (score=%d)", i, total, sc)
+        if progress_cb:
+            try:
+                progress_cb(i / total, sc)
+            except Exception:
+                pass
+    return sensitivity_scan(
+        resolved, cfg, score_range, lookback_days, hold_days, progress_cb=step_cb,
+    )

@@ -12,14 +12,17 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.chart import make_kline
 from src.config import load_config
 from src.fetcher import fix_stock_code
+from src.history import cleanup_old, list_scans, load_scan_df, save_scan
 from src.market import classify_market
+from src.preferences import load_prefs, save_prefs
 from src.report import write_excel
-from src.runner import run_backtest, run_holdings_scan, run_scan
+from src.runner import run_backtest, run_holdings_scan, run_scan, run_sensitivity
 from src.universe import fetch_twse_universe
 
 
@@ -238,6 +241,30 @@ def get_market_state_cached():
 base_cfg = get_base_config()
 
 
+# 載入使用者偏好
+if "_prefs_loaded" not in st.session_state:
+    prefs = load_prefs()
+    st.session_state["_prefs"] = prefs
+    st.session_state["_prefs_loaded"] = True
+else:
+    prefs = st.session_state["_prefs"]
+
+
+def fmt_int(n):
+    """千分位"""
+    try:
+        return f"{int(n):,}"
+    except Exception:
+        return str(n)
+
+
+def fmt_money(n):
+    try:
+        return f"{int(n):,} 元"
+    except Exception:
+        return str(n)
+
+
 # =====================================================
 # Preset application logic
 # =====================================================
@@ -256,11 +283,12 @@ def apply_preset(key):
     st.session_state["max_pos_pct"] = int(p["max_position_pct"] * 100)
 
 
-# 初始化 session_state 預設值
+# 初始化 session_state 預設值（套用偏好）
 if "preset" not in st.session_state:
-    apply_preset("balanced")
+    apply_preset(prefs.get("preset", "balanced"))
+    st.session_state["total_capital"] = int(prefs.get("total_capital", 1_000_000))
 if "watchlist" not in st.session_state:
-    st.session_state["watchlist"] = []  # list of dicts
+    st.session_state["watchlist"] = []
 
 
 # =====================================================
@@ -369,6 +397,20 @@ with st.sidebar:
             "觀察 ≥", 0, 20,
             st.session_state.get("thr_watch", 5), key="thr_watch",
         )
+
+    st.divider()
+    with st.expander("偏好設定", expanded=False):
+        st.caption("儲存後下次啟動會自動套用")
+        if st.button("儲存目前設定", use_container_width=True):
+            ok = save_prefs({
+                "preset": st.session_state.get("preset", "balanced"),
+                "total_capital": int(st.session_state.get("total_capital", 1_000_000)),
+                "onboarded": True,
+            })
+            if ok:
+                st.success("已儲存")
+            else:
+                st.error("儲存失敗")
 
     # 待處理 chip
     if st.session_state["watchlist"]:
@@ -486,6 +528,186 @@ def _action_class(action):
     if "觀察" in s:
         return "watch"
     return "skip"
+
+
+def _action_tooltip(action):
+    """為操作建議提供 hover 解釋"""
+    s = str(action)
+    if "突破" in s:
+        return "今日創 20 日新高並爆量，順勢追進"
+    if "拉回" in s:
+        return "曾突破後回測 MA10/MA20，於支撐上方掛限價"
+    if "區間" in s:
+        return "經過窄幅整理後突破上緣，量增確認"
+    if "進場" in s:
+        return "符合進場條件但無明確劇本，建議部位減半"
+    if "觀察" in s:
+        return "評分次強，列入觀察名單，明日再評估"
+    if "大盤" in s:
+        return "大盤位於 MA20 之下，暫停所有買入"
+    if "資金" in s:
+        return "依固定風險法計算結果不足 1 張，需提高風險% 或選低價標的"
+    return "未達進場門檻"
+
+
+def _turnover_color(val):
+    """換手率% 視覺基準色"""
+    if val is None or pd.isna(val):
+        return "#94A3B8"
+    v = float(val)
+    if v < 3:
+        return "#94A3B8"  # 冷
+    if v < 5:
+        return "#0F172A"  # 正常
+    if v < 10:
+        return "#D97706"  # 活絡
+    return "#DC2626"      # 過熱
+
+
+def _turnover_label(val):
+    if val is None or pd.isna(val):
+        return ""
+    v = float(val)
+    if v < 3:
+        return "偏冷"
+    if v < 5:
+        return "正常"
+    if v < 10:
+        return "活絡"
+    return "過熱"
+
+
+def render_edge_meter(expectancy):
+    """期望值 R 燈號條"""
+    try:
+        e = float(expectancy)
+    except Exception:
+        e = 0
+
+    # 區間：< 0 紅、0-0.2 黃、> 0.2 綠
+    val = max(min(e, 1.0), -0.5)
+    pct = (val + 0.5) / 1.5 * 100  # 映射到 0-100
+
+    if e < 0:
+        label = "無 edge"
+        color = "#DC2626"
+    elif e < 0.2:
+        label = "偏弱"
+        color = "#D97706"
+    elif e < 0.5:
+        label = "有 edge"
+        color = "#059669"
+    else:
+        label = "強 edge"
+        color = "#15803D"
+
+    st.markdown(
+        f"""
+<div style='background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:12px 16px;'>
+  <div style='display:flex; justify-content:space-between; margin-bottom:8px;'>
+    <span style='color:#64748B; font-size:0.78rem; font-weight:500;'>策略 Edge</span>
+    <span style='color:{color}; font-size:0.85rem; font-weight:600;'>{label}（期望值 {e:.2f} R）</span>
+  </div>
+  <div style='background:#F1F5F9; height:8px; border-radius:4px; position:relative; overflow:hidden;'>
+    <div style='position:absolute; left:{(0.5/1.5)*100:.0f}%; width:1px; height:100%; background:#94A3B8;'></div>
+    <div style='position:absolute; left:0; top:0; bottom:0; width:{pct:.1f}%; background:{color}; border-radius:4px;'></div>
+  </div>
+  <div style='display:flex; justify-content:space-between; margin-top:4px;'>
+    <span style='color:#94A3B8; font-size:0.7rem;'>-0.5</span>
+    <span style='color:#94A3B8; font-size:0.7rem;'>0</span>
+    <span style='color:#94A3B8; font-size:0.7rem;'>+1.0</span>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_drawdown_chart(trades):
+    """累積 R 折線 + drawdown 區域子圖"""
+    if len(trades) == 0:
+        return
+
+    trades = trades.copy().sort_values("entry_date")
+    trades["entry_date"] = pd.to_datetime(trades["entry_date"])
+    trades["累積R"] = trades["r_multiple"].fillna(0).cumsum()
+    trades["peak"] = trades["累積R"].cummax()
+    trades["drawdown"] = trades["累積R"] - trades["peak"]
+
+    from plotly.subplots import make_subplots
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.7, 0.3], vertical_spacing=0.03,
+        subplot_titles=("累積 R", "Drawdown"),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=trades["entry_date"], y=trades["累積R"], mode="lines",
+            line=dict(color="#4F46E5", width=2),
+            fill="tozeroy", fillcolor="rgba(79, 70, 229, 0.08)",
+            name="累積 R",
+        ),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=trades["entry_date"], y=trades["drawdown"], mode="lines",
+            line=dict(color="#DC2626", width=1.5),
+            fill="tozeroy", fillcolor="rgba(220, 38, 38, 0.15)",
+            name="Drawdown",
+        ),
+        row=2, col=1,
+    )
+    fig.update_layout(
+        height=380, showlegend=False,
+        margin=dict(l=8, r=8, t=40, b=8),
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+        font=dict(family="Inter, sans-serif", size=11, color="#0F172A"),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="#F1F5F9")
+    fig.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def render_monthly_returns(trades):
+    """月度報酬柱狀圖"""
+    if len(trades) == 0:
+        return
+    df = trades.copy()
+    df["entry_date"] = pd.to_datetime(df["entry_date"])
+    df["month"] = df["entry_date"].dt.to_period("M").astype(str)
+    monthly = df.groupby("month")["r_multiple"].sum().reset_index()
+    colors = ["#059669" if v >= 0 else "#DC2626" for v in monthly["r_multiple"]]
+
+    fig = go.Figure(go.Bar(
+        x=monthly["month"], y=monthly["r_multiple"],
+        marker_color=colors, marker_line_width=0,
+    ))
+    fig.update_layout(
+        height=260, margin=dict(l=8, r=8, t=8, b=8),
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+        font=dict(family="Inter, sans-serif", size=11),
+        showlegend=False,
+        yaxis_title="累積 R",
+    )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def render_onboarding():
+    """首次使用者引導"""
+    st.markdown("""
+<div style='background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:20px 24px; margin-bottom:14px;'>
+<h3 style='margin-top:0; font-size:1rem;'>歡迎使用</h3>
+<p style='color:#64748B; font-size:0.9rem; margin-bottom:12px;'>三個步驟開始：</p>
+<ol style='color:#0F172A; font-size:0.9rem; margin:0; padding-left:20px; line-height:1.8;'>
+  <li>左側選一個 <b>風格 Preset</b>（保守 / 平衡 / 積極）</li>
+  <li>選擇資料來源（上傳清單或全台股），點 <b>開始掃描</b></li>
+  <li>從進場候選卡片點「<b>詳細</b>」看 K 線，或「<b>待處理</b>」加入清單，再到側欄一鍵轉入持股管理</li>
+</ol>
+</div>
+""", unsafe_allow_html=True)
 
 
 def add_to_watchlist(code, name, entry, lots):
@@ -643,6 +865,12 @@ if run_btn:
         st.session_state["result"] = result
         st.session_state["cfg"] = cfg
         st.session_state["last_scan_at"] = datetime.now().strftime("%H:%M:%S")
+        try:
+            save_scan(result, market_state=result.get("market_state"),
+                      label=mode)
+            cleanup_old(keep_n=30)
+        except Exception as e:
+            logging.getLogger("main").warning("存歷史失敗：%s", e)
     except Exception as e:
         st.error(f"掃描失敗：{e}")
         st.exception(e)
@@ -670,7 +898,7 @@ render_market_banner(market_state, last_scan_at)
 # =====================================================
 # Tabs
 # =====================================================
-tab1, tab2, tab3 = st.tabs(["買入掃描", "持股管理", "回測"])
+tab1, tab2, tab3, tab4 = st.tabs(["買入掃描", "持股管理", "回測", "歷史"])
 
 
 # =====================================================
@@ -702,8 +930,15 @@ def render_top_candidates(df, ohlc_map, n=10):
         entry_type = row.get("進場類型", "—")
         warning = row.get("部位提示", "")
 
-        tr_str = f"{turnover}%" if turnover is not None and pd.notna(turnover) else "—"
+        tr_color = _turnover_color(turnover)
+        tr_label = _turnover_label(turnover)
+        tr_str = (
+            f"<span style='color:{tr_color};'>{turnover}%</span>"
+            f" <span style='color:#94A3B8; font-size:0.7rem;'>{tr_label}</span>"
+            if turnover is not None and pd.notna(turnover) else "—"
+        )
         warn_html = f"<div class='warn-text'>{warning}</div>" if warning else ""
+        action_tip = _action_tooltip(action)
 
         st.markdown(
             f"""
@@ -712,7 +947,7 @@ def render_top_candidates(df, ohlc_map, n=10):
     <div class='card-title'>
       <span class='code'>{row['股票']}</span>{row['公司名稱']}
     </div>
-    <div class='card-action {cls}'>{action}</div>
+    <div class='card-action {cls}' title='{action_tip}'>{action}</div>
   </div>
   <div class='card-meta'>評分 {score_d} · {entry_type}</div>
   <div class='card-grid'>
@@ -820,7 +1055,10 @@ def render_results_table(df, key_prefix=""):
 
 with tab1:
     if "result" not in st.session_state:
-        st.info("從側欄選擇資料來源後點「**開始掃描**」")
+        if not prefs.get("onboarded", False):
+            render_onboarding()
+        else:
+            st.info("從側欄選擇資料來源後點「**開始掃描**」")
     else:
         result = st.session_state["result"]
         df = result["df"]
@@ -1086,30 +1324,47 @@ with tab3:
         bt = st.session_state["backtest_result"]
         s = bt["summary"]
 
+        # Edge 燈號條（全寬）
+        render_edge_meter(s["期望值R"])
+        st.markdown("")
+
+        # KPI
         c = st.columns(4)
-        c[0].metric("總交易數", s["總交易數"])
+        c[0].metric("總交易數", fmt_int(s["總交易數"]))
         c[1].metric("勝率 %", f"{s['勝率%']}%",
                      delta=f"{s['勝率%']-50:.1f}%" if s["勝率%"] else None)
-        edge_label = "有 edge" if s["期望值R"] > 0.2 else ("偏弱" if s["期望值R"] > 0 else "無 edge")
-        c[2].metric("期望值 R", s["期望值R"], delta=edge_label, delta_color="off")
-        c[3].metric("平均報酬 %", f"{s['平均報酬%']}%")
+        c[2].metric("平均 R", s["平均R"])
+        c[3].metric("最大回撤 R", s["最大回撤R"])
 
         c2 = st.columns(3)
-        c2[0].metric("平均 R", s["平均R"])
+        c2[0].metric("平均報酬 %", f"{s['平均報酬%']}%")
         c2[1].metric("最大單筆 %", f"{s['最大單筆%']}%")
-        c2[2].metric("最大回撤 R", s["最大回撤R"])
+        c2[2].metric("期望值 R", s["期望值R"])
 
         if len(bt["trades"]):
-            st.markdown("### 累積 R 曲線")
-            trades = bt["trades"].copy().sort_values("entry_date")
-            trades["累積R"] = trades["r_multiple"].fillna(0).cumsum()
-            st.line_chart(trades.set_index("entry_date")[["累積R"]], height=280)
+            st.markdown("### 累積 R 與 Drawdown")
+            render_drawdown_chart(bt["trades"])
 
-            st.markdown("### 個股期望值排序（Top 30）")
-            st.dataframe(bt["by_symbol"].head(30), use_container_width=True, hide_index=True)
+            st.markdown("### 月度 R 分布")
+            render_monthly_returns(bt["trades"])
 
-            st.markdown("### 交易明細")
-            st.dataframe(bt["trades"], use_container_width=True, height=400, hide_index=True)
+            tcol1, tcol2 = st.columns(2)
+            with tcol1:
+                st.markdown("### Top 10 個股")
+                st.dataframe(
+                    bt["by_symbol"].head(10),
+                    use_container_width=True, hide_index=True,
+                )
+            with tcol2:
+                st.markdown("### Worst 10 個股")
+                st.dataframe(
+                    bt["by_symbol"].tail(10).sort_values("期望值R"),
+                    use_container_width=True, hide_index=True,
+                )
+
+            with st.expander("交易明細"):
+                st.dataframe(bt["trades"], use_container_width=True,
+                              height=400, hide_index=True)
 
             buf_bt = io.BytesIO()
             with pd.ExcelWriter(buf_bt, engine="openpyxl") as writer:
@@ -1123,5 +1378,94 @@ with tab3:
                 file_name="回測報告.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+
+            # ===== 敏感度分析 =====
+            st.divider()
+            st.markdown("### 敏感度分析")
+            st.caption("跑 min_score 4–7 各一次，比較不同門檻的 edge。需要先跑過一次回測。")
+            if st.button("跑敏感度", key="sens_btn"):
+                cfg = build_cfg()
+                resolved = bt.get("resolved")
+                if not resolved:
+                    st.error("缺少回測資料 — 請重跑回測")
+                else:
+                    bar2 = st.progress(0.0, text="敏感度分析中 …")
+                    def sens_progress(pct, sc):
+                        bar2.progress(min(pct, 1.0), text=f"min_score={sc}")
+                    try:
+                        sens_df = run_sensitivity(
+                            resolved, cfg, [4, 5, 6, 7],
+                            int(bt_lookback), int(bt_hold),
+                            progress_cb=sens_progress,
+                        )
+                        st.session_state["sensitivity"] = sens_df
+                    except Exception as e:
+                        st.error(f"敏感度失敗：{e}")
+
+            if "sensitivity" in st.session_state:
+                sens_df = st.session_state["sensitivity"]
+                st.dataframe(sens_df, use_container_width=True, hide_index=True)
+                # 視覺化期望值
+                fig_s = go.Figure(go.Bar(
+                    x=sens_df["min_score"], y=sens_df["期望值R"],
+                    marker_color=["#059669" if v > 0.2 else ("#D97706" if v > 0 else "#DC2626")
+                                   for v in sens_df["期望值R"]],
+                    text=[f"{v:.2f}" for v in sens_df["期望值R"]],
+                    textposition="outside", marker_line_width=0,
+                ))
+                fig_s.update_layout(
+                    height=260, margin=dict(l=8, r=8, t=8, b=8),
+                    plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                    showlegend=False,
+                    xaxis_title="min_score", yaxis_title="期望值 R",
+                    font=dict(family="Inter, sans-serif", size=11),
+                )
+                fig_s.update_xaxes(showgrid=False)
+                fig_s.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+                st.plotly_chart(fig_s, use_container_width=True,
+                                 config={"displayModeBar": False})
         else:
             st.warning("回測無任何交易產生 — 試試降低「最低評分」門檻")
+
+
+# =====================================================
+# Tab 4: 歷史
+# =====================================================
+with tab4:
+    st.markdown("### 掃描歷史")
+    st.caption("自動保存最近 30 次掃描，可隨時回看當日結果。")
+    scans = list_scans()
+    if not scans:
+        st.info("尚無歷史紀錄 — 跑一次掃描就會自動存檔")
+    else:
+        meta_df = pd.DataFrame([{
+            "時間": s["timestamp"],
+            "標籤": s["label"],
+            "大盤": s.get("market", "—"),
+            "掃描": s.get("n_total", 0),
+            "進場": s.get("n_enter", 0),
+            "觀察": s.get("n_watch", 0),
+            "耗時(秒)": s.get("elapsed_sec", "—"),
+            "_path": s["_path"],
+        } for s in scans])
+        display_meta = meta_df.drop(columns=["_path"])
+        st.dataframe(display_meta, use_container_width=True, hide_index=True)
+
+        sel = st.selectbox(
+            "查看明細",
+            options=meta_df["時間"].tolist(),
+            index=0,
+        )
+        if sel:
+            row = meta_df[meta_df["時間"] == sel].iloc[0]
+            old_df = load_scan_df(row["_path"])
+            if old_df is not None and len(old_df):
+                st.markdown(f"**{sel}** — 進場 {row['進場']} · 觀察 {row['觀察']}")
+                # 只顯示精簡欄位
+                cols_pref = ["股票", "公司名稱", "操作建議", "評分顯示",
+                              "進場參考價", "停損價", "風險%", "建議張數", "換手率%"]
+                show_cols = [c for c in cols_pref if c in old_df.columns]
+                st.dataframe(old_df[show_cols], use_container_width=True,
+                              hide_index=True)
+            else:
+                st.warning("找不到該次掃描的資料檔")
