@@ -134,6 +134,14 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 
 /* 候選卡片：完全使用 Streamlit 原生 container(border=True)，僅做最小化整體調整 */
 
+/* 卡片內的 metric 拿掉邊框/底色，避免「邊框中的邊框」雙層噪音 */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetric"] {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+}
+
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
     font-size: 0.95rem !important; font-weight: 500 !important;
@@ -935,21 +943,26 @@ def render_top_candidates(df, ohlc_map, n=10):
                     st.toast("已加入待處理", icon="·")
                     st.rerun()
 
-            # ===== 資料列：7 個 st.metric =====
+            # ===== 資料列：7 個 st.metric（副資訊改用 caption，避免 delta 箭頭誤導）=====
             mcols = st.columns(7)
             mcols[0].metric("進場", entry)
             mcols[1].metric("停損", stop)
             mcols[2].metric("目標 1", t1)
             mcols[3].metric("目標 2", t2)
             mcols[4].metric("風險", f"{risk_pct_val}%")
-            mcols[5].metric("建議張數", f"{lots} 張",
-                              delta=f"{cost_pct}% 資金",
-                              delta_color="off")
+
+            try:
+                lots_int = int(lots) if lots is not None and pd.notna(lots) else 0
+            except Exception:
+                lots_int = lots
+            mcols[5].metric("建議張數", f"{lots_int} 張")
+            mcols[5].caption(f"{cost_pct}% 資金")
+
             tr_value = f"{turnover}%" if turnover is not None and pd.notna(turnover) else "—"
             tr_label = _turnover_label(turnover) if turnover is not None and pd.notna(turnover) else ""
-            mcols[6].metric("換手率", tr_value,
-                              delta=tr_label if tr_label else None,
-                              delta_color="off")
+            mcols[6].metric("換手率", tr_value)
+            if tr_label:
+                mcols[6].caption(tr_label)
 
             if warning:
                 st.caption(f":orange[{warning}]")
