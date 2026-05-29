@@ -132,113 +132,7 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .banner b { font-weight: 600; }
 .banner .sep { color: var(--border); margin: 0 4px; }
 
-/* 候選卡片容器（用 st.container(border=True) 包，CSS 加左色條） */
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) {
-    border-radius: 6px !important;
-    padding: 10px 14px 12px 14px !important;
-    margin-bottom: 6px !important;
-    background: #FFFFFF !important;
-    border: 1px solid var(--border) !important;
-    transition: border-color 0.12s;
-}
-/* 確保內部子容器也透明（避免 Streamlit 內層 bg 蓋過卡片白底） */
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) > div,
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stVerticalBlock"],
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stHorizontalBlock"],
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="column"] {
-    background: transparent !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="go"]) {
-    border-left: 3px solid var(--positive) !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="watch"]) {
-    border-left: 3px solid var(--warning) !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="skip"]) {
-    border-left: 3px solid var(--subtle) !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]):hover {
-    border-color: var(--subtle) !important;
-}
-
-/* 標題列：baseline 對齊讓字底對齊 */
-.cand-title-line {
-    display: flex; align-items: baseline; gap: 10px;
-    font-size: 0.98rem; font-weight: 600; line-height: 1.3;
-}
-.cand-title-line .code {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--muted); font-size: 0.85rem; font-weight: 500;
-}
-.cand-title-line .name { color: var(--text); }
-.cand-title-line .action {
-    font-size: 0.78rem; font-weight: 600;
-    padding: 3px 10px; border-radius: 4px;
-    background: var(--slate-2); color: var(--slate);
-    white-space: nowrap;
-    letter-spacing: 0.01em;
-}
-.cand-title-line .action.go {
-    background: #16A34A; color: #FFFFFF;
-}
-.cand-title-line .action.watch {
-    background: #D97706; color: #FFFFFF;
-}
-.cand-title-line .action.skip {
-    background: var(--slate-2); color: var(--slate);
-}
-.cand-meta {
-    color: var(--muted); font-size: 0.72rem;
-    margin-top: 2px; margin-bottom: 8px;
-}
-
-/* 數據格：靠左對齊、value 加重 */
-.cand-grid {
-    display: grid; grid-template-columns: repeat(7, 1fr);
-    gap: 2px 16px; font-size: 0.88rem;
-    text-align: left;
-}
-.cand-grid > div { min-width: 0; }
-.cand-grid .label {
-    color: var(--muted); font-size: 0.66rem;
-    line-height: 1.1; margin-bottom: 2px;
-    text-transform: uppercase; letter-spacing: 0.04em;
-}
-.cand-grid .value {
-    font-weight: 600; color: var(--text);
-    font-variant-numeric: tabular-nums;
-    line-height: 1.2; font-size: 0.92rem;
-}
-.cand-grid .sub {
-    color: var(--muted); font-size: 0.7rem;
-    font-weight: 500; margin-top: 1px;
-    font-variant-numeric: tabular-nums;
-}
-.warn-text { color: var(--warning); font-size: 0.7rem; margin-top: 6px; }
-
-/* 卡片內按鈕：ghost style，低調 */
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) .stButton button {
-    padding: 0 10px !important;
-    min-height: 0 !important;
-    height: 24px !important;
-    font-size: 0.74rem !important;
-    line-height: 1 !important;
-    border: 1px solid var(--border) !important;
-    background: transparent !important;
-    color: var(--muted) !important;
-    border-radius: 4px !important;
-    font-weight: 500 !important;
-    transition: all 0.12s;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) .stButton button:hover {
-    border-color: var(--primary) !important;
-    color: var(--primary) !important;
-    background: var(--primary-2) !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="column"] { padding: 0 !important; }
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stHorizontalBlock"] { gap: 8px !important; align-items: center; }
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stMarkdownContainer"] { line-height: 1.3; }
-[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stMarkdownContainer"] p { margin: 0 !important; }
+/* 候選卡片：完全使用 Streamlit 原生 container(border=True)，僅做最小化整體調整 */
 
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
@@ -1004,7 +898,6 @@ def render_top_candidates(df, ohlc_map, n=10):
 
     for idx, (_, row) in enumerate(top.iterrows()):
         action = str(row.get("操作建議", ""))
-        cls = _action_class(action)
         entry = row.get("進場參考價", "—")
         stop = row.get("停損價", "—")
         t1 = row.get("目標價1(+1R半倉)", "—")
@@ -1017,61 +910,49 @@ def render_top_candidates(df, ohlc_map, n=10):
         entry_type = row.get("進場類型", "—")
         warning = row.get("部位提示", "")
 
-        tr_color = _turnover_color(turnover)
-        tr_label = _turnover_label(turnover)
-        if turnover is not None and pd.notna(turnover):
-            tr_value = f"<span style='color:{tr_color};'>{turnover}%</span>"
-            tr_sub = f"<div class='sub'>{tr_label}</div>"
-        else:
-            tr_value = "—"
-            tr_sub = ""
-        warn_html = f"<div class='warn-text'>{warning}</div>" if warning else ""
-        action_tip = _action_tooltip(action)
-
-        # 用 st.container(border=True) 確保真實邊框包住所有子元素
         with st.container(border=True):
-            # 隱形 marker 給 CSS :has() 用來決定左色條
-            st.markdown(
-                f"<span data-cand-state='{cls}' style='display:none'></span>",
-                unsafe_allow_html=True,
+            # ===== 標題列 =====
+            hc1, hc2, hc3 = st.columns([6, 1, 1])
+            hc1.markdown(
+                f"**{row['股票']}**  {row['公司名稱']}  "
+                f":green-badge[{action}]" if _action_class(action) == "go"
+                else (
+                    f"**{row['股票']}**  {row['公司名稱']}  :orange-badge[{action}]"
+                    if _action_class(action) == "watch"
+                    else f"**{row['股票']}**  {row['公司名稱']}  :gray-badge[{action}]"
+                )
             )
-
-            # 標題列
-            hcols = st.columns([7, 0.85, 1.0])
-            hcols[0].markdown(
-                f"""<div class='cand-title-line'>
-  <span class='code'>{row['股票']}</span>
-  <span class='name'>{row['公司名稱']}</span>
-  <span class='action {cls}' title='{action_tip}'>{action}</span>
-</div>
-<div class='cand-meta'>評分 {score_d} · {entry_type}</div>""",
-                unsafe_allow_html=True,
-            )
-            if hcols[1].button("詳細", key=f"detail_{idx}_{row['股票']}",
-                                use_container_width=True):
+            hc1.caption(f"評分 {score_d} · {entry_type}")
+            if hc2.button("詳細", key=f"detail_{idx}_{row['股票']}",
+                          use_container_width=True):
                 show_detail_dialog(row, ohlc_map)
-            if hcols[2].button("待處理", key=f"watch_{idx}_{row['股票']}",
-                                use_container_width=True):
+            if hc3.button("待處理", key=f"watch_{idx}_{row['股票']}",
+                          use_container_width=True):
                 added = add_to_watchlist(row["股票"], row["公司名稱"],
-                                           row.get("進場參考價", 0),
-                                           row.get("建議張數", 1))
+                                          row.get("進場參考價", 0),
+                                          row.get("建議張數", 1))
                 if added:
                     st.toast("已加入待處理", icon="·")
                     st.rerun()
 
-            # 資料 grid（value 主行 + sub 副行）
-            st.markdown(
-                f"""<div class='cand-grid'>
-  <div><div class='label'>進場</div><div class='value'>{entry}</div></div>
-  <div><div class='label'>停損</div><div class='value'>{stop}</div></div>
-  <div><div class='label'>目標 1</div><div class='value'>{t1}</div></div>
-  <div><div class='label'>目標 2</div><div class='value'>{t2}</div></div>
-  <div><div class='label'>風險</div><div class='value'>{risk_pct_val}%</div></div>
-  <div><div class='label'>建議</div><div class='value'>{lots} 張</div><div class='sub'>{cost_pct}% 資金</div></div>
-  <div><div class='label'>換手率</div><div class='value'>{tr_value}</div>{tr_sub}</div>
-</div>{warn_html}""",
-                unsafe_allow_html=True,
-            )
+            # ===== 資料列：7 個 st.metric =====
+            mcols = st.columns(7)
+            mcols[0].metric("進場", entry)
+            mcols[1].metric("停損", stop)
+            mcols[2].metric("目標 1", t1)
+            mcols[3].metric("目標 2", t2)
+            mcols[4].metric("風險", f"{risk_pct_val}%")
+            mcols[5].metric("建議張數", f"{lots} 張",
+                              delta=f"{cost_pct}% 資金",
+                              delta_color="off")
+            tr_value = f"{turnover}%" if turnover is not None and pd.notna(turnover) else "—"
+            tr_label = _turnover_label(turnover) if turnover is not None and pd.notna(turnover) else ""
+            mcols[6].metric("換手率", tr_value,
+                              delta=tr_label if tr_label else None,
+                              delta_color="off")
+
+            if warning:
+                st.caption(f":orange[{warning}]")
 
 
 def render_results_table(df, key_prefix=""):
