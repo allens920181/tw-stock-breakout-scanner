@@ -108,8 +108,12 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     }
 
 
-def run_holdings_scan(holdings_path, cfg, progress_cb=None):
-    """掃描 holdings.xlsx 中每檔的賣出建議"""
+def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=None):
+    """
+    掃描持股賣出建議。
+    holdings_path: 從 Excel 讀；或
+    holdings: 直接傳 list[{code, company_name, entry_price, entry_date, lots}]
+    """
     def emit(stage, pct, msg):
         log.info("[%s] %s", stage, msg)
         if progress_cb:
@@ -119,8 +123,9 @@ def run_holdings_scan(holdings_path, cfg, progress_cb=None):
                 pass
 
     cache_mod.ensure_dir(cfg["data"]["cache_dir"])
-    emit("讀取持股", 0.05, f"讀取 {holdings_path}")
-    holdings = load_holdings(holdings_path, cfg["etf_fix_map"])
+    if holdings is None:
+        emit("讀取持股", 0.05, f"讀取 {holdings_path}")
+        holdings = load_holdings(holdings_path, cfg["etf_fix_map"])
     emit("讀取持股", 0.10, f"讀入 {len(holdings)} 檔持股")
 
     items = [{"code": h["code"], "company_name": h["company_name"]} for h in holdings]

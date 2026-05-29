@@ -151,18 +151,7 @@ with st.sidebar:
     bt_min_score = st.number_input("回測最低評分", 0, 20, 5, 1)
     run_bt_btn = st.button("🔁 跑回測", use_container_width=True)
 
-    st.divider()
-    st.subheader("📦 持股管理")
-    holdings_file = st.file_uploader(
-        "持股 Excel (holdings.xlsx)",
-        type=["xlsx"], key="holdings_uploader",
-        help="欄位：股票代號 / 公司名稱 / 進場價 / 進場日 / 持有張數",
-    )
-    use_default_holdings = st.checkbox(
-        "使用 holdings.example.xlsx 範例",
-        value=not holdings_file,
-    )
-    run_holdings_btn = st.button("📊 分析持股", use_container_width=True)
+    st.caption("📦 持股管理請切到主畫面「持股管理」分頁")
 
 
 # =====================================================
@@ -277,47 +266,6 @@ if run_btn:
 
 
 # =====================================================
-# 持股分析
-# =====================================================
-if run_holdings_btn:
-    if holdings_file:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        tmp.write(holdings_file.getvalue())
-        tmp.close()
-        h_path = tmp.name
-    elif use_default_holdings and Path("holdings.example.xlsx").exists():
-        h_path = "holdings.example.xlsx"
-    else:
-        st.error("請上傳持股 Excel")
-        st.stop()
-
-    cfg = build_cfg()
-
-    h_progress = st.progress(0.0, text="持股分析準備中 ...")
-    h_log_area = st.expander("📋 持股分析記錄", expanded=False).empty()
-    h_buffer = []
-    h_handler = StListHandler(h_buffer)
-    h_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s",
-                                              datefmt="%H:%M:%S"))
-    logging.getLogger().addHandler(h_handler)
-
-    def h_progress_cb(stage, pct, msg):
-        h_progress.progress(min(pct, 1.0), text=f"{stage} — {msg}")
-        h_log_area.code("\n".join(h_buffer[-30:]) or "（執行中...）")
-
-    try:
-        with st.spinner("持股分析中 ..."):
-            h_result = run_holdings_scan(h_path, cfg, progress_cb=h_progress_cb)
-        st.session_state["holdings_result"] = h_result
-    except Exception as e:
-        st.error(f"持股分析失敗：{e}")
-        st.exception(e)
-    finally:
-        logging.getLogger().removeHandler(h_handler)
-    h_progress.progress(1.0, text="持股分析完成")
-
-
-# =====================================================
 # 回測
 # =====================================================
 if run_bt_btn:
@@ -424,22 +372,159 @@ with tab3:
             )
 
 with tab2:
-    if "holdings_result" not in st.session_state:
-        st.info("👈 從左側上傳 holdings.xlsx 後點「分析持股」")
-    else:
+    st.subheader("📦 我的持股")
+    st.caption("直接在表格內編輯：新增 / 刪除列、修改數值。儲存在瀏覽器 session 中，刷新會清空。")
+
+    # 初始化持股 DataFrame
+    if "holdings_df" not in st.session_state:
+        st.session_state["holdings_df"] = pd.DataFrame([
+            {"股票代號": "", "公司名稱": "", "進場價": 0.0,
+             "進場日": pd.Timestamp.today().normalize(), "持有張數": 1},
+        ])
+
+    # 工具列
+    btn_cols = st.columns([1, 1, 1, 2, 1])
+    if btn_cols[0].button("➕ 新增空白列"):
+        new_row = pd.DataFrame([{
+            "股票代號": "", "公司名稱": "", "進場價": 0.0,
+            "進場日": pd.Timestamp.today().normalize(), "持有張數": 1,
+        }])
+        st.session_state["holdings_df"] = pd.concat(
+            [st.session_state["holdings_df"], new_row], ignore_index=True,
+        )
+        st.rerun()
+
+    if btn_cols[1].button("📂 載入範例"):
+        if Path("holdings.example.xlsx").exists():
+            ex = pd.read_excel("holdings.example.xlsx")
+            ex["進場日"] = pd.to_datetime(ex["進場日"])
+            st.session_state["holdings_df"] = ex
+            st.rerun()
+        else:
+            st.warning("找不到 holdings.example.xlsx")
+
+    if btn_cols[2].button("🗑️ 清空"):
+        st.session_state["holdings_df"] = pd.DataFrame(columns=[
+            "股票代號", "公司名稱", "進場價", "進場日", "持有張數",
+        ])
+        st.rerun()
+
+    uploaded_h = btn_cols[3].file_uploader(
+        "或上傳 holdings.xlsx 覆蓋",
+        type=["xlsx"], key="holdings_uploader", label_visibility="collapsed",
+    )
+    if uploaded_h:
+        try:
+            up_df = pd.read_excel(uploaded_h)
+            up_df["進場日"] = pd.to_datetime(up_df["進場日"])
+            st.session_state["holdings_df"] = up_df
+            st.success(f"已載入 {len(up_df)} 筆")
+        except Exception as e:
+            st.error(f"讀取失敗：{e}")
+
+    # 編輯器
+    edited = st.data_editor(
+        st.session_state["holdings_df"],
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "股票代號": st.column_config.TextColumn(
+                "股票代號", required=True, help="例：2330",
+            ),
+            "公司名稱": st.column_config.TextColumn("公司名稱"),
+            "進場價": st.column_config.NumberColumn(
+                "進場價", min_value=0.0, step=0.5, format="%.2f",
+            ),
+            "進場日": st.column_config.DateColumn("進場日", format="YYYY-MM-DD"),
+            "持有張數": st.column_config.NumberColumn(
+                "持有張數", min_value=0, step=1, format="%d",
+            ),
+        },
+        key="holdings_editor",
+    )
+    st.session_state["holdings_df"] = edited
+
+    # 持股 Excel 匯出
+    e_buf = io.BytesIO()
+    with pd.ExcelWriter(e_buf, engine="openpyxl") as writer:
+        edited.to_excel(writer, sheet_name="持股", index=False)
+    e_buf.seek(0)
+    btn_cols[4].download_button(
+        "⬇️ 匯出",
+        data=e_buf.getvalue(),
+        file_name="my_holdings.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    st.divider()
+
+    if st.button("🚀 分析持股", type="primary"):
+        # 把 DataFrame 轉成 holdings list
+        valid = edited.dropna(subset=["股票代號"])
+        valid = valid[valid["股票代號"].astype(str).str.strip() != ""]
+
+        if len(valid) == 0:
+            st.error("請至少填入一檔持股")
+        else:
+            from src.fetcher import fix_stock_code
+            cfg = build_cfg()
+            holdings_list = []
+            for _, row in valid.iterrows():
+                code = fix_stock_code(row["股票代號"], cfg["etf_fix_map"])
+                if code is None:
+                    continue
+                ed = row["進場日"]
+                if isinstance(ed, pd.Timestamp):
+                    ed = ed.date()
+                holdings_list.append({
+                    "code": code,
+                    "company_name": str(row.get("公司名稱", "")).strip(),
+                    "entry_price": float(row["進場價"]) if pd.notna(row.get("進場價")) else 0,
+                    "entry_date": ed,
+                    "lots": int(row["持有張數"]) if pd.notna(row.get("持有張數")) else None,
+                })
+
+            h_progress = st.progress(0.0, text="準備中 ...")
+            h_log_area = st.expander("📋 執行記錄", expanded=False).empty()
+            h_buffer = []
+            h_handler = StListHandler(h_buffer)
+            h_handler.setFormatter(logging.Formatter(
+                "%(asctime)s %(levelname)s: %(message)s", datefmt="%H:%M:%S",
+            ))
+            logging.getLogger().addHandler(h_handler)
+
+            def h_progress_cb(stage, pct, msg):
+                h_progress.progress(min(pct, 1.0), text=f"{stage} — {msg}")
+                h_log_area.code("\n".join(h_buffer[-30:]) or "（執行中...）")
+
+            try:
+                with st.spinner("分析中 ..."):
+                    h_result = run_holdings_scan(
+                        cfg=cfg, holdings=holdings_list, progress_cb=h_progress_cb,
+                    )
+                st.session_state["holdings_result"] = h_result
+            except Exception as e:
+                st.error(f"分析失敗：{e}")
+                st.exception(e)
+            finally:
+                logging.getLogger().removeHandler(h_handler)
+            h_progress.progress(1.0, text="完成")
+
+    # 結果
+    if "holdings_result" in st.session_state:
+        st.divider()
         h_df = st.session_state["holdings_result"]["df"]
 
-        # 摘要：各類建議檔數
         action_counts = h_df["操作建議"].value_counts() if "操作建議" in h_df.columns else {}
-        st.subheader("📊 持股操作摘要")
-        cols = st.columns(min(len(action_counts), 6) or 1)
-        for i, (action, cnt) in enumerate(action_counts.items()):
-            cols[i % len(cols)].metric(action, cnt)
+        if len(action_counts):
+            st.subheader("📊 操作摘要")
+            cols = st.columns(min(len(action_counts), 6) or 1)
+            for i, (action, cnt) in enumerate(action_counts.items()):
+                cols[i % len(cols)].metric(action, cnt)
 
-        st.subheader("📋 持股清單")
+        st.subheader("📋 賣出建議")
         st.dataframe(h_df, use_container_width=True, height=400)
 
-        # 下載
         h_buf = io.BytesIO()
         with pd.ExcelWriter(h_buf, engine="openpyxl") as writer:
             h_df.to_excel(writer, sheet_name="持股賣出建議", index=False)
