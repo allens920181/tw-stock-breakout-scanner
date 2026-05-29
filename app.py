@@ -132,52 +132,75 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .banner b { font-weight: 600; }
 .banner .sep { color: var(--border); margin: 0 4px; }
 
-/* 卡片容器（包住整個 row：header + grid + buttons） */
+/* 卡片容器 */
 .candidate-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 8px 12px;
-    margin-bottom: 4px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
 }
 .candidate-wrap.go    { border-left: 3px solid var(--positive); }
 .candidate-wrap.watch { border-left: 3px solid var(--warning); }
 .candidate-wrap.skip  { border-left: 3px solid var(--subtle); }
 
 /* 標題列 */
-.cand-title { font-size: 0.92rem; font-weight: 600; line-height: 1.4; }
-.cand-title .code { font-family: 'JetBrains Mono', monospace; color: var(--muted); margin-right: 6px; font-size: 0.82rem; }
-.cand-meta { color: var(--muted); font-size: 0.72rem; margin-top: 1px; }
-.cand-action {
+.cand-title-line {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 0.95rem; font-weight: 600; line-height: 1.3;
+}
+.cand-title-line .code {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted); font-size: 0.82rem; font-weight: 500;
+}
+.cand-title-line .name { color: var(--text); }
+.cand-title-line .action {
     font-size: 0.72rem; font-weight: 500;
     padding: 2px 8px; border-radius: 10px;
     background: var(--slate-2); color: var(--slate);
-    display: inline-block;
+    white-space: nowrap;
 }
-.cand-action.go    { background: var(--positive-2); color: var(--positive); }
-.cand-action.watch { background: var(--warning-2); color: var(--warning); }
-.cand-action.skip  { background: var(--slate-2); color: var(--slate); }
+.cand-title-line .action.go    { background: var(--positive-2); color: var(--positive); }
+.cand-title-line .action.watch { background: var(--warning-2); color: var(--warning); }
+.cand-title-line .action.skip  { background: var(--slate-2); color: var(--slate); }
+.cand-meta {
+    color: var(--muted); font-size: 0.72rem;
+    margin-top: 2px; margin-bottom: 6px;
+}
 
 /* 數據格 */
 .cand-grid {
     display: grid; grid-template-columns: repeat(7, 1fr);
-    gap: 4px 12px; margin-top: 6px; font-size: 0.78rem;
+    gap: 2px 14px; font-size: 0.82rem;
 }
-.cand-grid .label { color: var(--muted); font-size: 0.66rem; line-height: 1; margin-bottom: 1px; }
-.cand-grid .value { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
-.warn-text { color: var(--warning); font-size: 0.72rem; margin-top: 4px; }
+.cand-grid .label { color: var(--muted); font-size: 0.68rem; line-height: 1.1; }
+.cand-grid .value { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.3; }
+.warn-text { color: var(--warning); font-size: 0.7rem; margin-top: 4px; }
 
-/* 卡片內按鈕緊湊化 */
+/* 卡片內按鈕：ghost style，低調 */
 .candidate-wrap .stButton button {
-    padding: 2px 8px !important;
+    padding: 2px 10px !important;
     min-height: 0 !important;
-    height: 26px !important;
-    font-size: 0.75rem !important;
+    height: 28px !important;
+    font-size: 0.78rem !important;
     line-height: 1 !important;
+    border: 1px solid var(--border) !important;
+    background: var(--surface) !important;
+    color: var(--muted) !important;
+    border-radius: 5px !important;
+    font-weight: 500 !important;
+    transition: all 0.12s;
+}
+.candidate-wrap .stButton button:hover {
+    border-color: var(--primary) !important;
+    color: var(--primary) !important;
+    background: var(--primary-2) !important;
 }
 .candidate-wrap [data-testid="column"] { padding: 0 !important; }
-.candidate-wrap [data-testid="stHorizontalBlock"] { gap: 6px !important; align-items: center; }
-.candidate-wrap [data-testid="stMarkdownContainer"] { line-height: 1.2; }
+.candidate-wrap [data-testid="stHorizontalBlock"] { gap: 8px !important; align-items: center; }
+.candidate-wrap [data-testid="stMarkdownContainer"] { line-height: 1.3; }
+/* 標題列那行的 markdown 不要佔多餘高度 */
+.candidate-wrap [data-testid="stMarkdownContainer"] p { margin: 0 !important; }
 
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
@@ -969,23 +992,21 @@ def render_top_candidates(df, ohlc_map, n=10):
         # 開啟卡片容器
         st.markdown(f"<div class='candidate-wrap {cls}'>", unsafe_allow_html=True)
 
-        # 標題列：[名稱 + 副標] [action chip] [詳細] [待處理]
-        hcols = st.columns([5, 1.4, 0.8, 0.9])
+        # 標題列：左邊 [code + 名稱 + chip 同行] 右邊 [詳細] [待處理]
+        hcols = st.columns([7, 0.85, 1.0])
         hcols[0].markdown(
-            f"<div class='cand-title'>"
-            f"<span class='code'>{row['股票']}</span>{row['公司名稱']}"
-            f"</div>"
-            f"<div class='cand-meta'>評分 {score_d} · {entry_type}</div>",
+            f"""<div class='cand-title-line'>
+  <span class='code'>{row['股票']}</span>
+  <span class='name'>{row['公司名稱']}</span>
+  <span class='action {cls}' title='{action_tip}'>{action}</span>
+</div>
+<div class='cand-meta'>評分 {score_d} · {entry_type}</div>""",
             unsafe_allow_html=True,
         )
-        hcols[1].markdown(
-            f"<div class='cand-action {cls}' title='{action_tip}'>{action}</div>",
-            unsafe_allow_html=True,
-        )
-        if hcols[2].button("詳細", key=f"detail_{idx}_{row['股票']}",
+        if hcols[1].button("詳細", key=f"detail_{idx}_{row['股票']}",
                             use_container_width=True):
             show_detail_dialog(row, ohlc_map)
-        if hcols[3].button("待處理", key=f"watch_{idx}_{row['股票']}",
+        if hcols[2].button("待處理", key=f"watch_{idx}_{row['股票']}",
                             use_container_width=True):
             added = add_to_watchlist(row["股票"], row["公司名稱"],
                                        row.get("進場參考價", 0),
