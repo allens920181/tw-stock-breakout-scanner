@@ -20,6 +20,7 @@ from src.config import load_config
 from src.fetcher import fix_stock_code
 from src.history import cleanup_old, list_scans, load_scan_df, save_scan
 from src.market import classify_market
+from src.name_lookup import lookup_names
 from src.preferences import load_prefs, save_prefs
 from src.report import write_excel
 from src.runner import run_backtest, run_holdings_scan, run_scan, run_sensitivity
@@ -1348,10 +1349,10 @@ with tab2:
         # 靜默保存編輯，名稱由下方「查詢名稱」按鈕主動觸發
         st.session_state["holdings_df"] = edited
 
-        # ===== 查詢名稱按鈕：偵測有空白名稱才啟用 =====
-        pending = 0
+        # ===== 查詢名稱按鈕：偵測「代號有 + 名稱空白」就算 pending =====
+        # （不要求 code 必須在 TWSE map 內，否則債券 ETF 等就按不下去）
+        pending_codes = []
         if len(edited) and "股票代號" in edited.columns:
-            code_map = get_code_name_map()
             for _, row in edited.iterrows():
                 code_raw = row.get("股票代號")
                 if code_raw is None or pd.isna(code_raw):
@@ -1362,16 +1363,19 @@ with tab2:
                 current_name = row.get("公司名稱")
                 if (current_name is None or pd.isna(current_name)
                         or str(current_name).strip() == ""):
-                    if code in code_map:
-                        pending += 1
+                    pending_codes.append(code)
+        pending = len(pending_codes)
 
         qb_col1, qb_col2 = st.columns([1.5, 5])
         label = f"查詢名稱 ({pending})" if pending else "查詢名稱"
         if qb_col1.button(label, use_container_width=True,
                            disabled=pending == 0,
-                           help="一次填入所有空白的公司名稱"):
-            code_map = get_code_name_map()
+                           help="先查 TWSE 對照表，找不到的自動退回 yfinance 查詢（首次較慢）"):
+            twse_map = get_code_name_map()
+            with st.spinner("查詢中（含 yfinance 後備）…"):
+                found = lookup_names(pending_codes, twse_map)
             new_df = edited.copy()
+            filled = 0
             for i, row in new_df.iterrows():
                 code_raw = row.get("股票代號")
                 if code_raw is None or pd.isna(code_raw):
@@ -1382,13 +1386,19 @@ with tab2:
                 current_name = row.get("公司名稱")
                 if (current_name is None or pd.isna(current_name)
                         or str(current_name).strip() == ""):
-                    name = code_map.get(code)
+                    name = found.get(code)
                     if name:
                         new_df.at[i, "公司名稱"] = name
+                        filled += 1
             st.session_state["holdings_df"] = new_df
+            miss = pending - filled
+            if miss:
+                st.warning(f"已填 {filled} 檔，{miss} 檔仍查無 — 請手動輸入")
+            else:
+                st.success(f"已填入 {filled} 檔名稱")
             st.rerun(scope="fragment")
         if pending:
-            qb_col2.caption(f"有 {pending} 檔代號填了但名稱空白，點左側按鈕一次填入")
+            qb_col2.caption(f"有 {pending} 檔代號填了但名稱空白，點左側按鈕查詢")
         else:
             qb_col2.caption("名稱填寫完成")
 
