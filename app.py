@@ -1213,8 +1213,8 @@ with tab2:
     # ============ 初始化 ============
     if "holdings_df" not in st.session_state:
         st.session_state["holdings_df"] = pd.DataFrame([
-            {"股票代號": "2330", "公司名稱": "台積電", "進場價": 0.00,
-             "進場日": pd.Timestamp.today().normalize(), "持有股數": 1000},
+            {"股票代號": "2330", "公司名稱": "台積電", "成本價": 0.00,
+             "持有股數": 1000},
         ])
 
     holdings_df_curr = st.session_state["holdings_df"]
@@ -1227,10 +1227,10 @@ with tab2:
 
     # ============ 統計：成本 / 現值 / 損益 ============
     total_cost = 0.0
-    if len(valid_h) and "進場價" in valid_h.columns and "持有股數" in valid_h.columns:
+    if len(valid_h) and "成本價" in valid_h.columns and "持有股數" in valid_h.columns:
         try:
             cost_series = (
-                valid_h["進場價"].fillna(0).astype(float)
+                valid_h["成本價"].fillna(0).astype(float)
                 * valid_h["持有股數"].fillna(0).astype(float)
             )
             total_cost = float(cost_series.sum())
@@ -1286,7 +1286,7 @@ with tab2:
         tt = st.columns(3)
         if tt[0].button("清空", use_container_width=True):
             st.session_state["holdings_df"] = pd.DataFrame(columns=[
-                "股票代號", "公司名稱", "進場價", "進場日", "持有股數",
+                "股票代號", "公司名稱", "成本價", "持有股數",
             ])
             st.session_state.pop("holdings_result", None)
             st.rerun()
@@ -1308,7 +1308,11 @@ with tab2:
             if uploaded_h:
                 try:
                     up_df = pd.read_excel(uploaded_h)
-                    up_df["進場日"] = pd.to_datetime(up_df["進場日"])
+                    # 舊版欄名相容
+                    if "進場價" in up_df.columns and "成本價" not in up_df.columns:
+                        up_df = up_df.rename(columns={"進場價": "成本價"})
+                    if "進場日" in up_df.columns:
+                        up_df = up_df.drop(columns=["進場日"])
                     st.session_state["holdings_df"] = up_df
                     st.success(f"已載入 {len(up_df)} 筆")
                 except Exception as e:
@@ -1330,11 +1334,8 @@ with tab2:
                     "公司名稱", width="medium",
                     help="留空會自動查詢",
                 ),
-                "進場價": st.column_config.NumberColumn(
-                    "進場價", min_value=0.0, step=0.01, format="%.2f", width="small",
-                ),
-                "進場日": st.column_config.DateColumn(
-                    "進場日", format="YYYY-MM-DD", width="small",
+                "成本價": st.column_config.NumberColumn(
+                    "成本價", min_value=0.0, step=0.01, format="%.2f", width="small",
                 ),
                 "持有股數": st.column_config.NumberColumn(
                     "持有股數", min_value=0, step=100, format="%d", width="small",
@@ -1389,19 +1390,17 @@ with tab2:
         valid = valid[valid["股票代號"].astype(str).str.strip() != ""]
         cfg = build_cfg()
         holdings_list = []
+        today = pd.Timestamp.today().date()
         for _, row in valid.iterrows():
             code = fix_stock_code(row["股票代號"], cfg["etf_fix_map"])
             if code is None:
                 continue
-            ed = row["進場日"]
-            if isinstance(ed, pd.Timestamp):
-                ed = ed.date()
             shares_val = int(row["持有股數"]) if pd.notna(row.get("持有股數")) else None
             holdings_list.append({
                 "code": code,
                 "company_name": str(row.get("公司名稱", "")).strip(),
-                "entry_price": float(row["進場價"]) if pd.notna(row.get("進場價")) else 0,
-                "entry_date": ed,
+                "entry_price": float(row["成本價"]) if pd.notna(row.get("成本價")) else 0,
+                "entry_date": today,  # 無進場日欄位，預設今天（時間停損從今天起算）
                 "shares": shares_val,
             })
 
