@@ -154,50 +154,72 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
     border-color: var(--subtle) !important;
 }
 
-/* 標題列 */
+/* 標題列：baseline 對齊讓字底對齊 */
 .cand-title-line {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 0.95rem; font-weight: 600; line-height: 1.3;
+    display: flex; align-items: baseline; gap: 10px;
+    font-size: 0.98rem; font-weight: 600; line-height: 1.3;
 }
 .cand-title-line .code {
     font-family: 'JetBrains Mono', monospace;
-    color: var(--muted); font-size: 0.82rem; font-weight: 500;
+    color: var(--muted); font-size: 0.85rem; font-weight: 500;
 }
 .cand-title-line .name { color: var(--text); }
 .cand-title-line .action {
-    font-size: 0.72rem; font-weight: 500;
-    padding: 2px 8px; border-radius: 10px;
+    font-size: 0.78rem; font-weight: 600;
+    padding: 3px 10px; border-radius: 4px;
     background: var(--slate-2); color: var(--slate);
     white-space: nowrap;
+    letter-spacing: 0.01em;
 }
-.cand-title-line .action.go    { background: var(--positive-2); color: var(--positive); }
-.cand-title-line .action.watch { background: var(--warning-2); color: var(--warning); }
-.cand-title-line .action.skip  { background: var(--slate-2); color: var(--slate); }
+.cand-title-line .action.go {
+    background: #16A34A; color: #FFFFFF;
+}
+.cand-title-line .action.watch {
+    background: #D97706; color: #FFFFFF;
+}
+.cand-title-line .action.skip {
+    background: var(--slate-2); color: var(--slate);
+}
 .cand-meta {
     color: var(--muted); font-size: 0.72rem;
-    margin-top: 2px; margin-bottom: 6px;
+    margin-top: 2px; margin-bottom: 8px;
 }
 
-/* 數據格 */
+/* 數據格：靠左對齊、value 加重 */
 .cand-grid {
     display: grid; grid-template-columns: repeat(7, 1fr);
-    gap: 2px 14px; font-size: 0.82rem;
+    gap: 2px 16px; font-size: 0.88rem;
+    text-align: left;
 }
-.cand-grid .label { color: var(--muted); font-size: 0.68rem; line-height: 1.1; }
-.cand-grid .value { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.3; }
-.warn-text { color: var(--warning); font-size: 0.7rem; margin-top: 4px; }
+.cand-grid > div { min-width: 0; }
+.cand-grid .label {
+    color: var(--muted); font-size: 0.66rem;
+    line-height: 1.1; margin-bottom: 2px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+}
+.cand-grid .value {
+    font-weight: 600; color: var(--text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2; font-size: 0.92rem;
+}
+.cand-grid .sub {
+    color: var(--muted); font-size: 0.7rem;
+    font-weight: 500; margin-top: 1px;
+    font-variant-numeric: tabular-nums;
+}
+.warn-text { color: var(--warning); font-size: 0.7rem; margin-top: 6px; }
 
 /* 卡片內按鈕：ghost style，低調 */
 [data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) .stButton button {
-    padding: 2px 10px !important;
+    padding: 0 10px !important;
     min-height: 0 !important;
-    height: 28px !important;
-    font-size: 0.78rem !important;
+    height: 24px !important;
+    font-size: 0.74rem !important;
     line-height: 1 !important;
     border: 1px solid var(--border) !important;
-    background: var(--surface) !important;
+    background: transparent !important;
     color: var(--muted) !important;
-    border-radius: 5px !important;
+    border-radius: 4px !important;
     font-weight: 500 !important;
     transition: all 0.12s;
 }
@@ -990,11 +1012,12 @@ def render_top_candidates(df, ohlc_map, n=10):
 
         tr_color = _turnover_color(turnover)
         tr_label = _turnover_label(turnover)
-        tr_str = (
-            f"<span style='color:{tr_color};'>{turnover}%</span>"
-            f" <span style='color:#94A3B8; font-size:0.66rem;'>{tr_label}</span>"
-            if turnover is not None and pd.notna(turnover) else "—"
-        )
+        if turnover is not None and pd.notna(turnover):
+            tr_value = f"<span style='color:{tr_color};'>{turnover}%</span>"
+            tr_sub = f"<div class='sub'>{tr_label}</div>"
+        else:
+            tr_value = "—"
+            tr_sub = ""
         warn_html = f"<div class='warn-text'>{warning}</div>" if warning else ""
         action_tip = _action_tooltip(action)
 
@@ -1029,7 +1052,7 @@ def render_top_candidates(df, ohlc_map, n=10):
                     st.toast("已加入待處理", icon="·")
                     st.rerun()
 
-            # 資料 grid
+            # 資料 grid（value 主行 + sub 副行）
             st.markdown(
                 f"""<div class='cand-grid'>
   <div><div class='label'>進場</div><div class='value'>{entry}</div></div>
@@ -1037,8 +1060,8 @@ def render_top_candidates(df, ohlc_map, n=10):
   <div><div class='label'>目標 1</div><div class='value'>{t1}</div></div>
   <div><div class='label'>目標 2</div><div class='value'>{t2}</div></div>
   <div><div class='label'>風險</div><div class='value'>{risk_pct_val}%</div></div>
-  <div><div class='label'>建議</div><div class='value'>{lots} 張 · {cost_pct}%</div></div>
-  <div><div class='label'>換手率</div><div class='value'>{tr_str}</div></div>
+  <div><div class='label'>建議</div><div class='value'>{lots} 張</div><div class='sub'>{cost_pct}% 資金</div></div>
+  <div><div class='label'>換手率</div><div class='value'>{tr_value}</div>{tr_sub}</div>
 </div>{warn_html}""",
                 unsafe_allow_html=True,
             )
