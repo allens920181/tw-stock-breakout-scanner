@@ -908,10 +908,21 @@ def render_top_candidates(df, ohlc_map, n=10):
     if "訊號判斷" not in df.columns:
         return
 
-    top = df[df["訊號判斷"] == "進場"].head(n)
+    entry_mask = df["訊號判斷"] == "進場"
+    actionable_mask = df.get("操作建議", pd.Series(dtype=str)).astype(str).str.contains("進場", na=False)
+    top = df[entry_mask & actionable_mask].head(n)
+
+    skipped = int((entry_mask & ~actionable_mask).sum())
+
     if len(top) == 0:
-        st.info("目前無進場候選 — 改變設定 / 風格 Preset 試試")
+        if skipped > 0:
+            st.info(f"有 {skipped} 檔達進場條件但「資金不足」 — 提高側欄「單筆風險%」或切「積極」preset")
+        else:
+            st.info("目前無進場候選 — 改變設定 / 風格 Preset 試試")
         return
+
+    if skipped > 0:
+        st.caption(f"另有 {skipped} 檔達進場條件但資金不足，可在表格查看")
 
     st.markdown("### 進場候選")
 
