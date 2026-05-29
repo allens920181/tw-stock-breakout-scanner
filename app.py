@@ -132,17 +132,27 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .banner b { font-weight: 600; }
 .banner .sep { color: var(--border); margin: 0 4px; }
 
-/* 卡片容器 */
-.candidate-wrap {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin-bottom: 6px;
+/* 候選卡片容器（用 st.container(border=True) 包，CSS 加左色條） */
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) {
+    border-radius: 6px !important;
+    padding: 10px 14px 12px 14px !important;
+    margin-bottom: 6px !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    transition: border-color 0.12s;
 }
-.candidate-wrap.go    { border-left: 3px solid var(--positive); }
-.candidate-wrap.watch { border-left: 3px solid var(--warning); }
-.candidate-wrap.skip  { border-left: 3px solid var(--subtle); }
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="go"]) {
+    border-left: 3px solid var(--positive) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="watch"]) {
+    border-left: 3px solid var(--warning) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="skip"]) {
+    border-left: 3px solid var(--subtle) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]):hover {
+    border-color: var(--subtle) !important;
+}
 
 /* 標題列 */
 .cand-title-line {
@@ -178,7 +188,7 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .warn-text { color: var(--warning); font-size: 0.7rem; margin-top: 4px; }
 
 /* 卡片內按鈕：ghost style，低調 */
-.candidate-wrap .stButton button {
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) .stButton button {
     padding: 2px 10px !important;
     min-height: 0 !important;
     height: 28px !important;
@@ -191,16 +201,15 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
     font-weight: 500 !important;
     transition: all 0.12s;
 }
-.candidate-wrap .stButton button:hover {
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) .stButton button:hover {
     border-color: var(--primary) !important;
     color: var(--primary) !important;
     background: var(--primary-2) !important;
 }
-.candidate-wrap [data-testid="column"] { padding: 0 !important; }
-.candidate-wrap [data-testid="stHorizontalBlock"] { gap: 8px !important; align-items: center; }
-.candidate-wrap [data-testid="stMarkdownContainer"] { line-height: 1.3; }
-/* 標題列那行的 markdown 不要佔多餘高度 */
-.candidate-wrap [data-testid="stMarkdownContainer"] p { margin: 0 !important; }
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="column"] { padding: 0 !important; }
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stHorizontalBlock"] { gap: 8px !important; align-items: center; }
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stMarkdownContainer"] { line-height: 1.3; }
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stMarkdownContainer"] p { margin: 0 !important; }
 
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
@@ -989,35 +998,40 @@ def render_top_candidates(df, ohlc_map, n=10):
         warn_html = f"<div class='warn-text'>{warning}</div>" if warning else ""
         action_tip = _action_tooltip(action)
 
-        # 開啟卡片容器
-        st.markdown(f"<div class='candidate-wrap {cls}'>", unsafe_allow_html=True)
+        # 用 st.container(border=True) 確保真實邊框包住所有子元素
+        with st.container(border=True):
+            # 隱形 marker 給 CSS :has() 用來決定左色條
+            st.markdown(
+                f"<span data-cand-state='{cls}' style='display:none'></span>",
+                unsafe_allow_html=True,
+            )
 
-        # 標題列：左邊 [code + 名稱 + chip 同行] 右邊 [詳細] [待處理]
-        hcols = st.columns([7, 0.85, 1.0])
-        hcols[0].markdown(
-            f"""<div class='cand-title-line'>
+            # 標題列
+            hcols = st.columns([7, 0.85, 1.0])
+            hcols[0].markdown(
+                f"""<div class='cand-title-line'>
   <span class='code'>{row['股票']}</span>
   <span class='name'>{row['公司名稱']}</span>
   <span class='action {cls}' title='{action_tip}'>{action}</span>
 </div>
 <div class='cand-meta'>評分 {score_d} · {entry_type}</div>""",
-            unsafe_allow_html=True,
-        )
-        if hcols[1].button("詳細", key=f"detail_{idx}_{row['股票']}",
-                            use_container_width=True):
-            show_detail_dialog(row, ohlc_map)
-        if hcols[2].button("待處理", key=f"watch_{idx}_{row['股票']}",
-                            use_container_width=True):
-            added = add_to_watchlist(row["股票"], row["公司名稱"],
-                                       row.get("進場參考價", 0),
-                                       row.get("建議張數", 1))
-            if added:
-                st.toast("已加入待處理", icon="·")
-                st.rerun()
+                unsafe_allow_html=True,
+            )
+            if hcols[1].button("詳細", key=f"detail_{idx}_{row['股票']}",
+                                use_container_width=True):
+                show_detail_dialog(row, ohlc_map)
+            if hcols[2].button("待處理", key=f"watch_{idx}_{row['股票']}",
+                                use_container_width=True):
+                added = add_to_watchlist(row["股票"], row["公司名稱"],
+                                           row.get("進場參考價", 0),
+                                           row.get("建議張數", 1))
+                if added:
+                    st.toast("已加入待處理", icon="·")
+                    st.rerun()
 
-        # 資料 grid
-        st.markdown(
-            f"""<div class='cand-grid'>
+            # 資料 grid
+            st.markdown(
+                f"""<div class='cand-grid'>
   <div><div class='label'>進場</div><div class='value'>{entry}</div></div>
   <div><div class='label'>停損</div><div class='value'>{stop}</div></div>
   <div><div class='label'>目標 1</div><div class='value'>{t1}</div></div>
@@ -1025,9 +1039,9 @@ def render_top_candidates(df, ohlc_map, n=10):
   <div><div class='label'>風險</div><div class='value'>{risk_pct_val}%</div></div>
   <div><div class='label'>建議</div><div class='value'>{lots} 張 · {cost_pct}%</div></div>
   <div><div class='label'>換手率</div><div class='value'>{tr_str}</div></div>
-</div>{warn_html}</div>""",
-            unsafe_allow_html=True,
-        )
+</div>{warn_html}""",
+                unsafe_allow_html=True,
+            )
 
 
 def render_results_table(df, key_prefix=""):
