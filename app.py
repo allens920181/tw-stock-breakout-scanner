@@ -271,6 +271,16 @@ def get_market_state_cached():
     return classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
 
 
+@st.cache_data(ttl=86400)
+def get_code_name_map():
+    """從 TWSE OpenAPI 抓代號 → 名稱 對照表（一天快取）"""
+    try:
+        uni = fetch_twse_universe(include_common=True, include_etf=True)
+        return {x["code"]: x["company_name"] for x in uni}
+    except Exception:
+        return {}
+
+
 base_cfg = get_base_config()
 
 
@@ -1221,7 +1231,10 @@ with tab2:
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "股票代號": st.column_config.TextColumn("股票代號", required=True, width="small"),
+            "股票代號": st.column_config.TextColumn(
+                "股票代號", required=True, width="small",
+                help="輸入代號後公司名稱會自動帶入",
+            ),
             "公司名稱": st.column_config.TextColumn("公司名稱", width="medium"),
             "進場價": st.column_config.NumberColumn("進場價", min_value=0.0, step=0.5, format="%.2f", width="small"),
             "進場日": st.column_config.DateColumn("進場日", format="YYYY-MM-DD", width="small"),
@@ -1229,7 +1242,31 @@ with tab2:
         },
         key="holdings_editor",
     )
-    st.session_state["holdings_df"] = edited
+
+    # 自動帶入公司名稱（代號填了但名稱空白）
+    if len(edited) and "股票代號" in edited.columns:
+        code_map = get_code_name_map()
+        changed = False
+        edited = edited.copy()
+        for i, row in edited.iterrows():
+            code_raw = row.get("股票代號")
+            if code_raw is None or pd.isna(code_raw):
+                continue
+            code = fix_stock_code(code_raw, base_cfg.get("etf_fix_map", {}))
+            if not code:
+                continue
+            current_name = row.get("公司名稱")
+            if (current_name is None or pd.isna(current_name)
+                    or str(current_name).strip() == ""):
+                name = code_map.get(code)
+                if name:
+                    edited.at[i, "公司名稱"] = name
+                    changed = True
+        st.session_state["holdings_df"] = edited
+        if changed:
+            st.rerun()
+    else:
+        st.session_state["holdings_df"] = edited
 
     st.markdown("")
 
