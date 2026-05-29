@@ -1290,6 +1290,9 @@ with tab2:
                 "股票代號", "公司名稱", "成本價", "持有股數",
             ])
             st.session_state.pop("holdings_result", None)
+            st.session_state["holdings_editor_version"] = (
+                st.session_state.get("holdings_editor_version", 0) + 1
+            )
             st.rerun()
         e_buf = io.BytesIO()
         with pd.ExcelWriter(e_buf, engine="openpyxl") as writer:
@@ -1315,13 +1318,21 @@ with tab2:
                     if "進場日" in up_df.columns:
                         up_df = up_df.drop(columns=["進場日"])
                     st.session_state["holdings_df"] = up_df
+                    st.session_state["holdings_editor_version"] = (
+                        st.session_state.get("holdings_editor_version", 0) + 1
+                    )
                     st.success(f"已載入 {len(up_df)} 筆")
                 except Exception as e:
                     st.error(f"讀取失敗：{e}")
 
-    # ============ 編輯器（fragment 隔離 rerun）============
+    # ============ 編輯器（fragment 隔離 rerun，不在 render 中重設 data 源）============
+    # editor_version 用來在「清空 / 上傳 / 查詢名稱」後重置編輯器
+    if "holdings_editor_version" not in st.session_state:
+        st.session_state["holdings_editor_version"] = 0
+
     @st.fragment
     def holdings_editor_fragment():
+        editor_key = f"holdings_editor_v{st.session_state['holdings_editor_version']}"
         edited = st.data_editor(
             st.session_state["holdings_df"],
             num_rows="dynamic",
@@ -1329,11 +1340,11 @@ with tab2:
             column_config={
                 "股票代號": st.column_config.TextColumn(
                     "股票代號", required=True, width="small",
-                    help="例：2330。輸入後公司名稱自動帶入",
+                    help="例：2330",
                 ),
                 "公司名稱": st.column_config.TextColumn(
                     "公司名稱", width="medium",
-                    help="留空會自動查詢",
+                    help="留空後按「查詢名稱」會自動帶入",
                 ),
                 "成本價": st.column_config.NumberColumn(
                     "成本價", min_value=0.0, step=0.01, format="%.2f", width="small",
@@ -1343,14 +1354,13 @@ with tab2:
                     help="1 張 = 1000 股",
                 ),
             },
-            key="holdings_editor",
+            key=editor_key,
         )
 
-        # 靜默保存編輯，名稱由下方「查詢名稱」按鈕主動觸發
-        st.session_state["holdings_df"] = edited
+        # 鏡像當前內容到另一個 key 給外部讀（不動 holdings_df，避免打斷編輯）
+        st.session_state["_holdings_edited"] = edited
 
-        # ===== 查詢名稱按鈕：偵測「代號有 + 名稱空白」就算 pending =====
-        # （不要求 code 必須在 TWSE map 內，否則債券 ETF 等就按不下去）
+        # ===== 查詢名稱按鈕 =====
         pending_codes = []
         if len(edited) and "股票代號" in edited.columns:
             for _, row in edited.iterrows():
@@ -1370,7 +1380,7 @@ with tab2:
         label = f"查詢名稱 ({pending})" if pending else "查詢名稱"
         if qb_col1.button(label, use_container_width=True,
                            disabled=pending == 0,
-                           help="先查 TWSE 對照表，找不到的自動退回 yfinance 查詢（首次較慢）"):
+                           help="TWSE 對照表 → 本地快取 → yfinance（首次較慢）"):
             twse_map = get_code_name_map()
             with st.spinner("查詢中（含 yfinance 後備）…"):
                 found = lookup_names(pending_codes, twse_map)
@@ -1391,6 +1401,7 @@ with tab2:
                         new_df.at[i, "公司名稱"] = name
                         filled += 1
             st.session_state["holdings_df"] = new_df
+            st.session_state["holdings_editor_version"] += 1  # 換 key 重置編輯器
             miss = pending - filled
             if miss:
                 st.warning(f"已填 {filled} 檔，{miss} 檔仍查無 — 請手動輸入")
@@ -1403,6 +1414,10 @@ with tab2:
             qb_col2.caption("名稱填寫完成")
 
     holdings_editor_fragment()
+    edited = st.session_state.get("_holdings_edited", st.session_state["holdings_df"])
+    # 把當前編輯狀態鏡像回 holdings_df 給下游讀 KPI / 分析使用
+    # （在 fragment 之外，不會影響編輯器的內部追蹤）
+    st.session_state["holdings_df"] = edited
 
     # ============ 分析按鈕 ============
     st.markdown("")
