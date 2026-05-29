@@ -409,31 +409,22 @@ with st.sidebar:
     st.markdown("### 資料來源")
 
     source_options = {
-        "default": "專案清單",
-        "upload": "上傳",
+        "upload": "上傳清單",
         "universe": "全台股",
     }
     source = st.segmented_control(
         "資料來源",
         options=list(source_options.keys()),
         format_func=lambda k: source_options[k],
-        default="default",
+        default="upload",
         label_visibility="collapsed",
     )
 
     uploaded = None
-    use_default = False
     universe_kind = "twse"
-    # 為向後相容（其他地方仍用 mode 變數判斷）
     mode = "掃描全台股" if source == "universe" else "上傳清單"
 
-    if source == "default":
-        if Path("stock_list.xlsx").exists():
-            st.caption("使用 `stock_list.xlsx`")
-            use_default = True
-        else:
-            st.warning("找不到 stock_list.xlsx — 改選上傳或全台股")
-    elif source == "upload":
+    if source == "upload":
         uploaded = st.file_uploader(
             "上傳 xlsx", type=["xlsx"], label_visibility="collapsed",
         )
@@ -1164,10 +1155,8 @@ with tab1:
             tmp.write(uploaded.getvalue())
             tmp.close()
             input_path = tmp.name
-        elif use_default and Path("stock_list.xlsx").exists():
-            input_path = "stock_list.xlsx"
         else:
-            st.error("請上傳股票清單，或勾選『使用專案內 stock_list.xlsx』")
+            st.error("請從側欄選擇資料來源（上傳清單或全台股）")
             st.stop()
 
         cfg = build_cfg()
@@ -1625,10 +1614,8 @@ with tab3:
             tmp.write(uploaded.getvalue())
             tmp.close()
             bt_input = tmp.name
-        elif use_default and Path("stock_list.xlsx").exists():
-            bt_input = "stock_list.xlsx"
         else:
-            st.error("請先在側欄設定股票來源")
+            st.error("請從側欄選擇資料來源（上傳清單或全台股）")
             st.stop()
 
         cfg = build_cfg()
