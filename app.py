@@ -1094,7 +1094,8 @@ def render_top_candidates(df, ohlc_map, n=10):
 
 
 def render_results_table(df, key_prefix=""):
-    fcol1, fcol2, fcol3, fcol4 = st.columns([2, 1.5, 1, 1])
+    # ===== Row 1：訊號 / 進場類型 / 最低評分 / 搜尋 =====
+    fcol1, fcol2, fcol3, fcol4 = st.columns([2, 2, 1.5, 1.5])
 
     signal_options = ["進場", "觀察", "不操作"]
     available_signals = [
@@ -1102,23 +1103,70 @@ def render_results_table(df, key_prefix=""):
         if "訊號判斷" in df.columns and (df["訊號判斷"] == s).any()
     ]
     default_signals = [s for s in ["進場", "觀察"] if s in available_signals]
-
     sel_signals = fcol1.multiselect(
         "訊號", options=available_signals,
         default=default_signals or available_signals,
         key=f"{key_prefix}sig",
     )
+
+    entry_type_options = []
+    if "進場類型" in df.columns:
+        entry_type_options = sorted(
+            [x for x in df["進場類型"].dropna().unique() if x and x != "—"]
+        )
+    sel_entry_types = fcol2.multiselect(
+        "進場類型", options=entry_type_options,
+        default=entry_type_options,
+        key=f"{key_prefix}etype",
+        disabled=len(entry_type_options) == 0,
+    )
+
     max_score = int(df["評分"].max()) if len(df) and "評分" in df.columns else 8
-    min_score_filter = fcol2.slider(
+    min_score_filter = fcol3.slider(
         "最低評分", 0, max_score, 0, key=f"{key_prefix}minsc",
     )
-    keyword = fcol3.text_input("搜尋", placeholder="股票或公司名",
+    keyword = fcol4.text_input("搜尋", placeholder="股票或公司名",
                                 key=f"{key_prefix}kw")
-    show_full = fcol4.toggle("顯示全欄", value=False, key=f"{key_prefix}full")
 
+    # ===== Row 2：風險% / 換手率% / 建議張數 / 顯示全欄 =====
+    fr1, fr2, fr3, fr4 = st.columns([2, 2, 1.5, 1.5])
+
+    if "風險%" in df.columns and df["風險%"].notna().any():
+        risk_max = float(df["風險%"].max())
+        risk_range = fr1.slider(
+            "風險% 範圍", 0.0, max(risk_max, 50.0), (0.0, max(risk_max, 50.0)),
+            step=1.0, key=f"{key_prefix}risk",
+        )
+    else:
+        risk_range = None
+
+    if "換手率%" in df.columns and df["換手率%"].notna().any():
+        tr_max = float(df["換手率%"].max())
+        tr_range = fr2.slider(
+            "換手率% 範圍", 0.0, max(tr_max, 30.0), (0.0, max(tr_max, 30.0)),
+            step=0.5, key=f"{key_prefix}tr",
+        )
+    else:
+        tr_range = None
+
+    lots_min = fr3.number_input(
+        "最少建議張數", min_value=0, value=0, step=1,
+        key=f"{key_prefix}lots",
+        help="只看建議買入至少 N 張的（資金不足的會被排除）",
+    )
+    show_full = fr4.toggle("顯示全欄", value=False, key=f"{key_prefix}full")
+
+    # ===== 套用所有篩選（AND）=====
     filtered = df.copy()
     if "訊號判斷" in filtered.columns and sel_signals:
         filtered = filtered[filtered["訊號判斷"].isin(sel_signals)]
+    if "進場類型" in filtered.columns and sel_entry_types and entry_type_options:
+        # 「—」或空值視為不限
+        mask = filtered["進場類型"].isin(sel_entry_types) | filtered["進場類型"].isna() | (filtered["進場類型"] == "—")
+        if set(sel_entry_types) != set(entry_type_options):
+            # 使用者有手動取消，才嚴格篩選
+            mask = filtered["進場類型"].isin(sel_entry_types)
+        filtered = filtered[mask]
     if "評分" in filtered.columns:
         filtered = filtered[filtered["評分"] >= min_score_filter]
     if keyword:
@@ -1128,6 +1176,18 @@ def render_results_table(df, key_prefix=""):
             | filtered.get("公司名稱", pd.Series(dtype=str)).astype(str).str.contains(k, case=False, na=False)
         )
         filtered = filtered[mask]
+    if risk_range is not None and "風險%" in filtered.columns:
+        filtered = filtered[
+            (filtered["風險%"].fillna(0) >= risk_range[0])
+            & (filtered["風險%"].fillna(0) <= risk_range[1])
+        ]
+    if tr_range is not None and "換手率%" in filtered.columns:
+        filtered = filtered[
+            (filtered["換手率%"].fillna(0) >= tr_range[0])
+            & (filtered["換手率%"].fillna(0) <= tr_range[1])
+        ]
+    if lots_min > 0 and "建議張數" in filtered.columns:
+        filtered = filtered[filtered["建議張數"].fillna(0) >= lots_min]
 
     st.caption(f"顯示 {len(filtered)} / {len(df)} 筆")
 
