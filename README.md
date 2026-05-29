@@ -21,15 +21,19 @@ uv sync
 
 1. 建立 `stock_list.xlsx`，欄位：`股票代號`、`公司名稱`
 2. （可選）調整 `config.yaml`
-3. 執行：
+
+### 方式 A — GUI（推薦）
+
+```bash
+uv run streamlit run app.py
+```
+
+瀏覽器自動開啟介面：上傳清單、調整參數（過濾門檻、評分權重、分級門檻）、即時進度、結果表格篩選排序、下載 Excel。
+
+### 方式 B — CLI
 
 ```bash
 uv run python main.py
-```
-
-常用參數：
-
-```bash
 uv run python main.py -i my_list.xlsx -c my_config.yaml --min-score 5 --log-file run.log
 ```
 
@@ -45,7 +49,8 @@ uv run pytest
 
 ```
 .
-├── main.py              # 程式入口（CLI）
+├── app.py               # Streamlit GUI
+├── main.py              # CLI 入口
 ├── config.yaml          # 策略 / 資料 / 輸出參數
 ├── src/
 │   ├── config.py        # 讀 yaml
@@ -53,7 +58,8 @@ uv run pytest
 │   ├── fetcher.py       # yfinance 批次下載 + 平行抓股數
 │   ├── indicators.py    # MA / KD / MACD
 │   ├── scoring.py       # 過濾 + 加權評分
-│   └── report.py        # Excel 輸出
+│   ├── report.py        # Excel 輸出
+│   └── runner.py        # 共用掃描流程（GUI/CLI）
 └── tests/
     ├── test_fix_code.py
     ├── test_indicators.py
