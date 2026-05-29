@@ -63,13 +63,29 @@ st.markdown("""
     --slate-2:   #F1F5F9;
 }
 
-html, body, [class*="st-"], button, input, textarea {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif !important;
+/* 字體：只套到一般文字節點，避免覆蓋 Material Symbols icon 字體 */
+html, body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     color: var(--text);
 }
-code, pre { font-family: 'JetBrains Mono', monospace !important; }
+.stMarkdown, .stText, p, span:not([class*="material-symbols"]):not([class*="icon"]),
+div:not([class*="material-symbols"]):not([class*="icon"]),
+label, h1, h2, h3, h4, h5, h6, button {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+code, pre, [data-testid="stMetricValue"] {
+    font-family: 'JetBrains Mono', monospace;
+}
+/* 保留 Material Symbols icon 字體，不被 Inter 蓋掉 */
+[class*="material-symbols"],
+.material-symbols-outlined, .material-symbols-rounded, .material-symbols-sharp,
+[data-testid*="Icon"], [data-testid*="icon"] {
+    font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', 'Material Symbols Sharp' !important;
+    font-feature-settings: 'liga';
+}
 
-#MainMenu, footer, header { visibility: hidden; height: 0; }
+#MainMenu, footer { visibility: hidden; height: 0; }
+[data-testid="stHeader"] { background: transparent; }
 
 .block-container {
     padding-top: 1.2rem;
