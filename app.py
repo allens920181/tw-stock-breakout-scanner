@@ -137,9 +137,16 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
     border-radius: 6px !important;
     padding: 10px 14px 12px 14px !important;
     margin-bottom: 6px !important;
-    background: var(--surface) !important;
+    background: #FFFFFF !important;
     border: 1px solid var(--border) !important;
     transition: border-color 0.12s;
+}
+/* 確保內部子容器也透明（避免 Streamlit 內層 bg 蓋過卡片白底） */
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) > div,
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stVerticalBlock"],
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="stHorizontalBlock"],
+[data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state]) [data-testid="column"] {
+    background: transparent !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:has([data-cand-state="go"]) {
     border-left: 3px solid var(--positive) !important;
