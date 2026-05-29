@@ -114,23 +114,28 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 [data-testid="stMetricValue"] { font-size: 1.3rem !important; font-weight: 600 !important; }
 [data-testid="stMetricDelta"] { font-size: 0.75rem !important; }
 
-.banner {
-    padding: 10px 14px; border-radius: 6px;
-    border: 1px solid var(--border); background: var(--surface);
-    margin-bottom: 14px; display: flex; align-items: center; gap: 10px;
-    font-size: 0.9rem;
+/* Header 右側狀態列（取代原本的全寬 banner） */
+.hdr-right {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
 }
-.banner .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.banner.bull    { border-left: 3px solid var(--positive); }
-.banner.bull .dot { background: var(--positive); }
-.banner.bear    { border-left: 3px solid var(--negative); }
-.banner.bear .dot { background: var(--negative); }
-.banner.neutral { border-left: 3px solid var(--warning); }
-.banner.neutral .dot { background: var(--warning); }
-.banner.unknown { border-left: 3px solid var(--subtle); }
-.banner.unknown .dot { background: var(--subtle); }
-.banner b { font-weight: 600; }
-.banner .sep { color: var(--border); margin: 0 4px; }
+.hdr-status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.85rem; color: var(--text);
+    padding: 4px 10px; border-radius: 6px;
+    background: var(--surface); border: 1px solid var(--border);
+}
+.hdr-status .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.hdr-status.bull    { border-left: 3px solid var(--positive); }
+.hdr-status.bull .dot { background: var(--positive); }
+.hdr-status.bear    { border-left: 3px solid var(--negative); }
+.hdr-status.bear .dot { background: var(--negative); }
+.hdr-status.neutral { border-left: 3px solid var(--warning); }
+.hdr-status.neutral .dot { background: var(--warning); }
+.hdr-status.unknown { border-left: 3px solid var(--subtle); }
+.hdr-status.unknown .dot { background: var(--subtle); }
+.hdr-status b { font-weight: 600; }
+.hdr-status .sep { color: var(--border); margin: 0 4px; }
+.hdr-detail { color: var(--muted); }
 
 /* 候選卡片：完全使用 Streamlit 原生 container(border=True)，僅做最小化整體調整 */
 
@@ -185,21 +190,7 @@ button[kind="secondary"]:hover { border-color: var(--subtle) !important; backgro
 """, unsafe_allow_html=True)
 
 
-# =====================================================
-# Header
-# =====================================================
-st.markdown(
-    f"""
-<div class='app-header'>
-  <div>
-    <div class='app-title'>台股強勢突破掃描器</div>
-    <div class='app-sub'>加權評分 · 換手率分析 · 操作建議</div>
-  </div>
-  <div class='app-date'>{pd.Timestamp.today().strftime('%Y / %m / %d  %A')}</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+# Header 移到後面與大盤狀態合併渲染
 
 
 # =====================================================
@@ -476,23 +467,42 @@ def make_progress_block(title):
     return bar, log_area, buf, handler
 
 
-def render_market_banner(market_state, last_scan_at=None):
-    if not market_state:
-        return
-    regime = market_state["regime"]
-    cls = {"bull": "bull", "bear": "bear", "neutral": "neutral"}.get(regime, "unknown")
-    label = market_state["label"]
-    for sym in ["🟢", "🔴", "🟡", "⚪"]:
-        label = label.replace(sym, "")
-    label = label.strip()
-    last = ""
-    if last_scan_at:
-        last = f"<span class='sep'>·</span>上次掃描 {last_scan_at}"
+def render_header(market_state, last_scan_at=None):
+    """整合的 header：左側標題，右側大盤狀態 + 日期/上次掃描"""
+    date_str = pd.Timestamp.today().strftime('%Y / %m / %d  %A')
+
+    if market_state:
+        regime = market_state["regime"]
+        cls = {"bull": "bull", "bear": "bear", "neutral": "neutral"}.get(regime, "unknown")
+        label = market_state["label"]
+        for sym in ["🟢", "🔴", "🟡", "⚪"]:
+            label = label.replace(sym, "")
+        label = label.strip()
+        detail = market_state.get("detail", "")
+        status_html = (
+            f"<div class='hdr-status {cls}'>"
+            f"<span class='dot'></span>"
+            f"<b>大盤 {label}</b>"
+            f"<span class='sep'>·</span>"
+            f"<span class='hdr-detail'>{detail}</span>"
+            f"</div>"
+        )
+    else:
+        status_html = ""
+
+    last = f"<span class='sep'>·</span>上次掃描 {last_scan_at}" if last_scan_at else ""
+
     st.markdown(
         f"""
-<div class='banner {cls}'>
-  <span class='dot'></span>
-  <span><b>大盤</b><span class='sep'>·</span>{label}<span class='sep'>·</span>{market_state['detail']}{last}</span>
+<div class='app-header'>
+  <div>
+    <div class='app-title'>台股強勢突破掃描器</div>
+    <div class='app-sub'>加權評分 · 換手率分析 · 操作建議</div>
+  </div>
+  <div class='hdr-right'>
+    {status_html}
+    <div class='app-date'>{date_str}{last}</div>
+  </div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -859,7 +869,7 @@ if run_btn:
 
 
 # =====================================================
-# Market banner (一開啟就抓)
+# Header + Market status (整合到頁首右側)
 # =====================================================
 last_scan_at = st.session_state.get("last_scan_at")
 market_state = None
@@ -870,7 +880,7 @@ if market_state is None:
         market_state = get_market_state_cached()
     except Exception:
         market_state = None
-render_market_banner(market_state, last_scan_at)
+render_header(market_state, last_scan_at)
 
 
 # =====================================================
