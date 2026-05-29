@@ -122,20 +122,46 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     else:
         actions.append(("✅ 續抱", "保留", f"未觸發出場條件 報酬 {profit_pct:.1f}%"))
 
+    # ===== 出場策略階梯（無論觸發與否，都計算給使用者參考）=====
+    target_1r = round(entry_price + risk, 2) if risk > 0 else None
+    target_2r = round(entry_price + 2 * risk, 2) if risk > 0 else None
+    trail_stop = round(ma10, 2)  # 移動停利線：MA10
+    if entry_date is not None:
+        try:
+            from datetime import timedelta
+            # 10 個交易日 ≈ 14 自然日
+            time_stop_dt = entry_date + timedelta(days=14)
+            time_stop_str = time_stop_dt.strftime("%Y-%m-%d")
+        except Exception:
+            time_stop_str = None
+    else:
+        time_stop_str = None
+
+    exit_plan = {
+        "停損價": round(estimated_stop, 2),
+        "目標1(+1R半倉)": target_1r,
+        "目標2(+2R出清)": target_2r,
+        "移動停利MA10": trail_stop,
+        "時間停損日": time_stop_str,
+        "技術轉弱觸發": f"K<D 且 收盤<MA20({ma20:.2f})",
+    }
+
     label, qty, note = actions[0]
     return _row(symbol, name, market, entry_price, entry_date, shares,
-                close, profit_pct, r_multiple, held_days, "成功", label, note, qty)
+                close, profit_pct, r_multiple, held_days, "成功", label, note, qty,
+                exit_plan=exit_plan)
 
 
 def _row(symbol, name, market, entry_price, entry_date, shares,
-         close, profit_pct, r_mult, held_days, status, action, note, qty="—"):
-    return {
+         close, profit_pct, r_mult, held_days, status, action, note, qty="—",
+         exit_plan=None):
+    base = {
         "股票": symbol,
         "公司名稱": name,
         "市場": market,
         "進場日": str(entry_date) if entry_date else None,
         "持有天數": held_days,
-        "進場價": entry_price,
+        "成本價": entry_price,
         "目前價": round(close, 2) if close is not None else None,
         "報酬%": round(profit_pct, 2) if profit_pct is not None else None,
         "R倍數": round(r_mult, 2) if r_mult is not None else None,
@@ -145,3 +171,6 @@ def _row(symbol, name, market, entry_price, entry_date, shares,
         "說明": note,
         "狀態": status,
     }
+    if exit_plan:
+        base.update(exit_plan)
+    return base

@@ -1460,6 +1460,38 @@ with tab2:
             st.markdown("### 續抱")
             st.dataframe(hold, use_container_width=True, hide_index=True)
 
+        # ============ 出場策略階梯 ============
+        st.markdown("### 出場策略階梯")
+        st.caption("每檔持股的完整出場規劃 — 觸發任一條件就執行對應動作")
+
+        exit_cols = ["股票", "公司名稱", "成本價", "目前價", "報酬%",
+                      "停損價", "目標1(+1R半倉)", "目標2(+2R出清)",
+                      "移動停利MA10", "時間停損日", "技術轉弱觸發"]
+        avail = [c for c in exit_cols if c in h_df.columns]
+        exit_df = h_df[avail].copy()
+
+        # 數值格式化
+        col_cfg_exit = {}
+        for c in ["成本價", "目前價", "停損價", "目標1(+1R半倉)",
+                   "目標2(+2R出清)", "移動停利MA10"]:
+            if c in exit_df.columns:
+                col_cfg_exit[c] = st.column_config.NumberColumn(c, format="%.2f")
+        if "報酬%" in exit_df.columns:
+            col_cfg_exit["報酬%"] = st.column_config.NumberColumn("報酬%", format="%.2f%%")
+
+        st.dataframe(exit_df, use_container_width=True, hide_index=True,
+                      column_config=col_cfg_exit)
+
+        with st.expander("出場規則說明"):
+            st.markdown("""
+- **停損價** — 跌破即全出，由 MA20 與近 10 日低點取較高者
+- **目標 1 (+1R)** — 觸及賣出 1/2 鎖利（剩餘半倉轉移動停利）
+- **目標 2 (+2R)** — 觸及全部出清
+- **移動停利 (MA10)** — 已有 5% 以上獲利時，跌破 MA10 全出鎖利
+- **時間停損** — 進場後 10 個交易日仍未到 +1R 全出（換股提升資金效率）
+- **技術轉弱** — K 死叉 D 且跌破 MA20 → 動能消失，提早出場
+            """)
+
         h_buf = io.BytesIO()
         with pd.ExcelWriter(h_buf, engine="openpyxl") as writer:
             h_df.to_excel(writer, sheet_name="持股賣出建議", index=False)
