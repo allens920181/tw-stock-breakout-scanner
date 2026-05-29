@@ -870,69 +870,6 @@ def show_detail_dialog(row, ohlc_map):
 
 
 # =====================================================
-# Execute scan
-# =====================================================
-if run_btn:
-    input_path = None
-    items = None
-
-    if mode == "掃描全台股":
-        try:
-            with st.spinner("抓取全台股清單 …"):
-                raw = fetch_twse_universe(
-                    include_common=universe_kind in ("twse", "twse-common"),
-                    include_etf=universe_kind in ("twse", "twse-etf"),
-                )
-            items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
-            st.info(f"將掃描 {len(items)} 檔")
-        except Exception as e:
-            st.error(f"抓取全台股清單失敗：{e}")
-            st.stop()
-    elif uploaded:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        tmp.write(uploaded.getvalue())
-        tmp.close()
-        input_path = tmp.name
-    elif use_default and Path("stock_list.xlsx").exists():
-        input_path = "stock_list.xlsx"
-    else:
-        st.error("請上傳股票清單，或勾選『使用專案內 stock_list.xlsx』")
-        st.stop()
-
-    cfg = build_cfg()
-    bar, log_area, buf, handler = make_progress_block("掃描")
-    logging.getLogger().setLevel(logging.INFO)
-    logging.getLogger().addHandler(handler)
-
-    def on_progress(stage, pct, msg):
-        bar.progress(min(pct, 1.0), text=f"{stage} — {msg}")
-        log_area.code("\n".join(buf[-30:]) or "（執行中…）")
-
-    try:
-        with st.spinner("掃描中 …"):
-            result = run_scan(
-                input_path=input_path, cfg=cfg,
-                progress_cb=on_progress, items=items,
-            )
-        st.session_state["result"] = result
-        st.session_state["cfg"] = cfg
-        st.session_state["last_scan_at"] = datetime.now().strftime("%H:%M:%S")
-        try:
-            save_scan(result, market_state=result.get("market_state"),
-                      label=mode)
-            cleanup_old(keep_n=30)
-        except Exception as e:
-            logging.getLogger("main").warning("存歷史失敗：%s", e)
-    except Exception as e:
-        st.error(f"掃描失敗：{e}")
-        st.exception(e)
-        st.stop()
-    finally:
-        logging.getLogger().removeHandler(handler)
-    bar.progress(1.0, text=f"完成（{result['elapsed_sec']:.1f} 秒）")
-
-
-# =====================================================
 # Header + Market status (整合到頁首右側)
 # =====================================================
 last_scan_at = st.session_state.get("last_scan_at")
@@ -1125,6 +1062,66 @@ def render_results_table(df, key_prefix=""):
 
 
 with tab1:
+    # ===== 執行掃描（進度條 / log 顯示在 tab1 內）=====
+    if run_btn:
+        input_path = None
+        items = None
+
+        if mode == "掃描全台股":
+            try:
+                with st.spinner("抓取全台股清單 …"):
+                    raw = fetch_twse_universe(
+                        include_common=universe_kind in ("twse", "twse-common"),
+                        include_etf=universe_kind in ("twse", "twse-etf"),
+                    )
+                items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
+                st.info(f"將掃描 {len(items)} 檔")
+            except Exception as e:
+                st.error(f"抓取全台股清單失敗：{e}")
+                st.stop()
+        elif uploaded:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            tmp.write(uploaded.getvalue())
+            tmp.close()
+            input_path = tmp.name
+        elif use_default and Path("stock_list.xlsx").exists():
+            input_path = "stock_list.xlsx"
+        else:
+            st.error("請上傳股票清單，或勾選『使用專案內 stock_list.xlsx』")
+            st.stop()
+
+        cfg = build_cfg()
+        bar, log_area, buf, handler = make_progress_block("掃描")
+        logging.getLogger().setLevel(logging.INFO)
+        logging.getLogger().addHandler(handler)
+
+        def on_progress(stage, pct, msg):
+            bar.progress(min(pct, 1.0), text=f"{stage} — {msg}")
+            log_area.code("\n".join(buf[-30:]) or "（執行中…）")
+
+        try:
+            with st.spinner("掃描中 …"):
+                result = run_scan(
+                    input_path=input_path, cfg=cfg,
+                    progress_cb=on_progress, items=items,
+                )
+            st.session_state["result"] = result
+            st.session_state["cfg"] = cfg
+            st.session_state["last_scan_at"] = datetime.now().strftime("%H:%M:%S")
+            try:
+                save_scan(result, market_state=result.get("market_state"),
+                          label=mode)
+                cleanup_old(keep_n=30)
+            except Exception as e:
+                logging.getLogger("main").warning("存歷史失敗：%s", e)
+        except Exception as e:
+            st.error(f"掃描失敗：{e}")
+            st.exception(e)
+            st.stop()
+        finally:
+            logging.getLogger().removeHandler(handler)
+        bar.progress(1.0, text=f"完成（{result['elapsed_sec']:.1f} 秒）")
+
     if "result" not in st.session_state:
         if not prefs.get("onboarded", False):
             render_onboarding()
