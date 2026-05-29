@@ -1345,12 +1345,34 @@ with tab2:
             key="holdings_editor",
         )
 
-        # 自動帶入名稱（不強制 rerun，避免打斷其他格的輸入）
-        # 名稱會在下次自然 rerun 時顯示（使用者點別處 / 編輯下一格）
+        # 靜默保存編輯，名稱由下方「查詢名稱」按鈕主動觸發
+        st.session_state["holdings_df"] = edited
+
+        # ===== 查詢名稱按鈕：偵測有空白名稱才啟用 =====
+        pending = 0
         if len(edited) and "股票代號" in edited.columns:
             code_map = get_code_name_map()
-            need_fill = False
-            for i, row in edited.iterrows():
+            for _, row in edited.iterrows():
+                code_raw = row.get("股票代號")
+                if code_raw is None or pd.isna(code_raw):
+                    continue
+                code = fix_stock_code(code_raw, base_cfg.get("etf_fix_map", {}))
+                if not code:
+                    continue
+                current_name = row.get("公司名稱")
+                if (current_name is None or pd.isna(current_name)
+                        or str(current_name).strip() == ""):
+                    if code in code_map:
+                        pending += 1
+
+        qb_col1, qb_col2 = st.columns([1.5, 5])
+        label = f"查詢名稱 ({pending})" if pending else "查詢名稱"
+        if qb_col1.button(label, use_container_width=True,
+                           disabled=pending == 0,
+                           help="一次填入所有空白的公司名稱"):
+            code_map = get_code_name_map()
+            new_df = edited.copy()
+            for i, row in new_df.iterrows():
                 code_raw = row.get("股票代號")
                 if code_raw is None or pd.isna(code_raw):
                     continue
@@ -1362,24 +1384,13 @@ with tab2:
                         or str(current_name).strip() == ""):
                     name = code_map.get(code)
                     if name:
-                        need_fill = True
-                        break
-            if need_fill:
-                edited = edited.copy()
-                for i, row in edited.iterrows():
-                    code_raw = row.get("股票代號")
-                    if code_raw is None or pd.isna(code_raw):
-                        continue
-                    code = fix_stock_code(code_raw, base_cfg.get("etf_fix_map", {}))
-                    if not code:
-                        continue
-                    current_name = row.get("公司名稱")
-                    if (current_name is None or pd.isna(current_name)
-                            or str(current_name).strip() == ""):
-                        name = code_map.get(code)
-                        if name:
-                            edited.at[i, "公司名稱"] = name
-        st.session_state["holdings_df"] = edited
+                        new_df.at[i, "公司名稱"] = name
+            st.session_state["holdings_df"] = new_df
+            st.rerun(scope="fragment")
+        if pending:
+            qb_col2.caption(f"有 {pending} 檔代號填了但名稱空白，點左側按鈕一次填入")
+        else:
+            qb_col2.caption("名稱填寫完成")
 
     holdings_editor_fragment()
 
