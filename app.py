@@ -139,6 +139,32 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 
 /* 候選卡片：完全使用 Streamlit 原生 container(border=True)，僅做最小化整體調整 */
 
+/* 候選資料 cell（取代 st.metric 以塞入副資訊） */
+.cell { line-height: 1.2; padding: 0; }
+.cell-label {
+    color: var(--muted); font-size: 0.7rem;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin-bottom: 2px;
+}
+.cell-value {
+    font-weight: 700; color: var(--text);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+}
+.cell-sub {
+    color: var(--muted); font-size: 0.7rem;
+    font-weight: 500; margin-top: 1px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 標題列內的警示文字 */
+.cand-warn {
+    color: var(--warning); font-size: 0.75rem;
+    text-align: right; padding-top: 4px;
+    line-height: 1.2;
+}
+
 /* 卡片內的 metric 拿掉邊框/底色，避免「邊框中的邊框」雙層噪音 */
 [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetric"] {
     background: transparent !important;
@@ -961,18 +987,20 @@ def render_top_candidates(df, ohlc_map, n=10):
         warning = row.get("部位提示", "")
 
         with st.container(border=True):
-            # ===== 標題列 =====
-            hc1, hc2, hc3 = st.columns([6, 1, 1])
-            hc1.markdown(
+            # ===== 標題列：[title] [warning] [詳細] [待處理] =====
+            badge_color = _action_class(action)
+            badge_token = {"go": "green", "watch": "orange", "skip": "gray"}.get(badge_color, "gray")
+            title_md = (
                 f"**{row['股票']}**  {row['公司名稱']}  "
-                f":green-badge[{action}]" if _action_class(action) == "go"
-                else (
-                    f"**{row['股票']}**  {row['公司名稱']}  :orange-badge[{action}]"
-                    if _action_class(action) == "watch"
-                    else f"**{row['股票']}**  {row['公司名稱']}  :gray-badge[{action}]"
-                )
+                f":{badge_token}-badge[{action}]"
             )
+
+            hc1, hc_warn, hc2, hc3 = st.columns([5, 2.2, 1, 1])
+            hc1.markdown(title_md)
             hc1.caption(f"評分 {score_d} · {entry_type}")
+            if warning:
+                hc_warn.markdown(f"<div class='cand-warn'>⚠ {warning}</div>",
+                                  unsafe_allow_html=True)
             if hc2.button("詳細", key=f"detail_{idx}_{row['股票']}",
                           use_container_width=True):
                 show_detail_dialog(row, ohlc_map)
@@ -985,29 +1013,34 @@ def render_top_candidates(df, ohlc_map, n=10):
                     st.toast("已加入待處理", icon="·")
                     st.rerun()
 
-            # ===== 資料列：7 個 st.metric（副資訊改用 caption，避免 delta 箭頭誤導）=====
-            mcols = st.columns(7)
-            mcols[0].metric("進場", entry)
-            mcols[1].metric("停損", stop)
-            mcols[2].metric("目標 1", t1)
-            mcols[3].metric("目標 2", t2)
-            mcols[4].metric("風險", f"{risk_pct_val}%")
-
+            # ===== 資料列：7 個自訂 cell（含內嵌副資訊）=====
             try:
                 lots_int = int(lots) if lots is not None and pd.notna(lots) else 0
             except Exception:
                 lots_int = lots
-            mcols[5].metric("建議張數", f"{lots_int} 張")
-            mcols[5].caption(f"{cost_pct}% 資金")
-
             tr_value = f"{turnover}%" if turnover is not None and pd.notna(turnover) else "—"
             tr_label = _turnover_label(turnover) if turnover is not None and pd.notna(turnover) else ""
-            mcols[6].metric("換手率", tr_value)
-            if tr_label:
-                mcols[6].caption(tr_label)
 
-            if warning:
-                st.caption(f":orange[{warning}]")
+            cells = [
+                ("進場",   entry,          None),
+                ("停損",   stop,           None),
+                ("目標 1", t1,             None),
+                ("目標 2", t2,             None),
+                ("風險",   f"{risk_pct_val}%", None),
+                ("建議",   f"{lots_int} 張", f"{cost_pct}% 資金"),
+                ("換手率", tr_value,       tr_label or None),
+            ]
+            mcols = st.columns(7)
+            for i, (lab, val, sub) in enumerate(cells):
+                sub_html = f"<div class='cell-sub'>{sub}</div>" if sub else ""
+                mcols[i].markdown(
+                    f"<div class='cell'>"
+                    f"<div class='cell-label'>{lab}</div>"
+                    f"<div class='cell-value'>{val}</div>"
+                    f"{sub_html}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def render_results_table(df, key_prefix=""):
