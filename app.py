@@ -1186,23 +1186,8 @@ with tab2:
              "進場日": pd.Timestamp.today().normalize(), "持有張數": 1},
         ])
 
-    tb = st.columns([1, 1, 1, 1, 2])
-    if tb[0].button("新增列", use_container_width=True):
-        new_row = pd.DataFrame([{
-            "股票代號": "", "公司名稱": "", "進場價": 0.0,
-            "進場日": pd.Timestamp.today().normalize(), "持有張數": 1,
-        }])
-        st.session_state["holdings_df"] = pd.concat(
-            [st.session_state["holdings_df"], new_row], ignore_index=True,
-        )
-        st.rerun()
-    if tb[1].button("載入範例", use_container_width=True):
-        if Path("holdings.example.xlsx").exists():
-            ex = pd.read_excel("holdings.example.xlsx")
-            ex["進場日"] = pd.to_datetime(ex["進場日"])
-            st.session_state["holdings_df"] = ex
-            st.rerun()
-    if tb[2].button("清空", use_container_width=True):
+    tb = st.columns([1, 1, 2])
+    if tb[0].button("清空", use_container_width=True):
         st.session_state["holdings_df"] = pd.DataFrame(columns=[
             "股票代號", "公司名稱", "進場價", "進場日", "持有張數",
         ])
@@ -1212,13 +1197,13 @@ with tab2:
     with pd.ExcelWriter(e_buf, engine="openpyxl") as writer:
         st.session_state["holdings_df"].to_excel(writer, sheet_name="持股", index=False)
     e_buf.seek(0)
-    tb[3].download_button(
+    tb[1].download_button(
         "匯出", data=e_buf.getvalue(),
         file_name="my_holdings.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
-    uploaded_h = tb[4].file_uploader(
+    uploaded_h = tb[2].file_uploader(
         "上傳覆蓋", type=["xlsx"], key="holdings_uploader",
         label_visibility="collapsed",
     )
