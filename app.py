@@ -1345,11 +1345,11 @@ with tab2:
             key="holdings_editor",
         )
 
-        # 自動帶入名稱（rerun 只重畫 fragment，不動到頁首/KPI/sidebar）
+        # 自動帶入名稱（不強制 rerun，避免打斷其他格的輸入）
+        # 名稱會在下次自然 rerun 時顯示（使用者點別處 / 編輯下一格）
         if len(edited) and "股票代號" in edited.columns:
             code_map = get_code_name_map()
-            changed = False
-            edited = edited.copy()
+            need_fill = False
             for i, row in edited.iterrows():
                 code_raw = row.get("股票代號")
                 if code_raw is None or pd.isna(code_raw):
@@ -1362,13 +1362,24 @@ with tab2:
                         or str(current_name).strip() == ""):
                     name = code_map.get(code)
                     if name:
-                        edited.at[i, "公司名稱"] = name
-                        changed = True
-            st.session_state["holdings_df"] = edited
-            if changed:
-                st.rerun(scope="fragment")
-        else:
-            st.session_state["holdings_df"] = edited
+                        need_fill = True
+                        break
+            if need_fill:
+                edited = edited.copy()
+                for i, row in edited.iterrows():
+                    code_raw = row.get("股票代號")
+                    if code_raw is None or pd.isna(code_raw):
+                        continue
+                    code = fix_stock_code(code_raw, base_cfg.get("etf_fix_map", {}))
+                    if not code:
+                        continue
+                    current_name = row.get("公司名稱")
+                    if (current_name is None or pd.isna(current_name)
+                            or str(current_name).strip() == ""):
+                        name = code_map.get(code)
+                        if name:
+                            edited.at[i, "公司名稱"] = name
+        st.session_state["holdings_df"] = edited
 
     holdings_editor_fragment()
 

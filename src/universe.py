@@ -33,13 +33,23 @@ def _classify(code, name):
     code = str(code).strip()
     name = str(name).strip()
 
-    # 含字母（特別股、權證等）
+    # ETF 含字母後綴（債券/槓桿/反向）：00679B, 00687B, 00633L, 00664R...
+    # 規則：00 開頭 + 數字 + 單字母結尾，長度 5~7
+    if (5 <= len(code) <= 7
+            and code.startswith("00")
+            and code[-1].isalpha()
+            and code[:-1].isdigit()):
+        return "etf", True
+
+    # ETF 純數字：0050、00878、009805 等
+    if code.isdigit() and code.startswith("00") and 4 <= len(code) <= 6:
+        return "etf", True
+    if code.isdigit() and len(code) >= 5 and code.startswith("0"):
+        return "etf", True
+
+    # 含字母（特別股、權證等）— 上面 ETF 字母規則已先處理
     if not code.isdigit():
         return "special", False
-
-    # ETF：0 開頭，長度 4~6（0050、00878、009805...）
-    if code.startswith("00") or (len(code) >= 5 and code.startswith("0")):
-        return "etf", True
 
     # TDR：9 開頭 4 碼（91xx、92xx、93xx）
     if len(code) == 4 and code.startswith("9"):
@@ -49,7 +59,7 @@ def _classify(code, name):
     if "特" in name:
         return "special", False
 
-    # 受益證券、不動產（K 開頭也常為 REITs）
+    # 受益證券、不動產
     if "受益" in name or "不動產" in name:
         return "special", False
 
