@@ -1189,64 +1189,6 @@ def render_results_table(df, key_prefix=""):
     if lots_min > 0 and "建議張數" in filtered.columns:
         filtered = filtered[filtered["建議張數"].fillna(0) >= lots_min]
 
-    # ===== Row 3：排序方式 =====
-    sort_options = {
-        "best": "建議優先（操作建議 → 評分 → 換手率）",
-        "score": "評分高到低",
-        "turnover": "換手率高到低",
-        "risk_asc": "風險低到高",
-        "rr": "RR 比高到低",
-        "code": "股票代號",
-    }
-    sort_choice = st.selectbox(
-        "排序方式", options=list(sort_options.keys()),
-        format_func=lambda k: sort_options[k],
-        key=f"{key_prefix}sort", index=0,
-        label_visibility="collapsed",
-    )
-
-    # 套用排序
-    if sort_choice == "best":
-        # 操作建議的優先序：進場類 < 觀察 < 不操作 < 暫停 < 資金不足
-        order_map = {}
-        for label in filtered.get("操作建議", pd.Series(dtype=str)).astype(str).unique():
-            if "進場" in label and "拉回" in label:
-                order_map[label] = 0
-            elif "進場" in label and "突破" in label and "區間" not in label:
-                order_map[label] = 1
-            elif "進場" in label and "區間" in label:
-                order_map[label] = 2
-            elif "進場" in label:
-                order_map[label] = 3
-            elif "觀察" in label:
-                order_map[label] = 4
-            elif "大盤" in label:
-                order_map[label] = 8
-            elif "資金" in label:
-                order_map[label] = 9
-            else:
-                order_map[label] = 5
-        if "操作建議" in filtered.columns:
-            filtered = filtered.copy()
-            filtered["_rank"] = filtered["操作建議"].astype(str).map(order_map).fillna(5)
-            sort_cols = ["_rank"]
-            asc = [True]
-            if "評分" in filtered.columns:
-                sort_cols.append("評分"); asc.append(False)
-            if "換手率%" in filtered.columns:
-                sort_cols.append("換手率%"); asc.append(False)
-            filtered = filtered.sort_values(sort_cols, ascending=asc).drop(columns=["_rank"])
-    elif sort_choice == "score" and "評分" in filtered.columns:
-        filtered = filtered.sort_values("評分", ascending=False, na_position="last")
-    elif sort_choice == "turnover" and "換手率%" in filtered.columns:
-        filtered = filtered.sort_values("換手率%", ascending=False, na_position="last")
-    elif sort_choice == "risk_asc" and "風險%" in filtered.columns:
-        filtered = filtered.sort_values("風險%", ascending=True, na_position="last")
-    elif sort_choice == "rr" and "RR比" in filtered.columns:
-        filtered = filtered.sort_values("RR比", ascending=False, na_position="last")
-    elif sort_choice == "code" and "股票" in filtered.columns:
-        filtered = filtered.sort_values("股票", ascending=True)
-
     st.caption(f"顯示 {len(filtered)} / {len(df)} 筆")
 
     # 精簡欄位（預設）
