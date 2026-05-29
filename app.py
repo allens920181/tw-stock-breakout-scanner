@@ -18,6 +18,7 @@ import streamlit as st
 from src.chart import make_kline
 from src.config import load_config
 from src.fetcher import fix_stock_code
+from src.glossary import HELP
 from src.history import cleanup_old, list_scans, load_scan_df, save_scan
 from src.market import classify_market
 from src.name_lookup import lookup_names
@@ -488,54 +489,63 @@ with st.sidebar:
         total_capital = st.number_input(
             "總資金（元）", min_value=100_000,
             value=int(base_cfg.get("position_sizing", {}).get("total_capital", 1_000_000)),
-            step=100_000, key="total_capital",
+            step=100_000, key="total_capital", help=HELP["total_capital"],
         )
         risk_pct = st.slider(
             "單筆風險 %", 0.5, 5.0,
             st.session_state.get("risk_pct", 1.0), 0.25, key="risk_pct",
+            help=HELP["risk_per_trade"],
         ) / 100
         max_pos_pct = st.slider(
             "單檔最大佔比 %", 5, 50,
             st.session_state.get("max_pos_pct", 20), 5, key="max_pos_pct",
+            help=HELP["max_pos_pct"],
         ) / 100
 
     with st.expander("品質過濾", expanded=False):
         min_price = st.number_input(
             "最低股價", min_value=0.0,
             value=st.session_state.get("min_price", 10.0), step=1.0, key="min_price",
+            help=HELP["min_price"],
         )
         min_avg_volume = st.number_input(
             "20 日均量下限（股）", min_value=0,
             value=st.session_state.get("min_avg_volume", 500_000), step=100_000,
-            key="min_avg_volume",
+            key="min_avg_volume", help=HELP["min_avg_volume"],
         )
         require_ma60 = st.checkbox(
             "必須站上 MA60",
             value=st.session_state.get("require_ma60", True), key="require_ma60",
+            help=HELP["require_ma60"],
         )
         min_risk_pct = st.slider(
             "最小停損距離 %", 0.0, 10.0,
             st.session_state.get("min_risk_pct", 0.02) * 100, 0.5,
-            key="min_risk_pct_slider",
+            key="min_risk_pct_slider", help=HELP["min_risk_pct"],
         ) / 100
 
     with st.expander("評分權重 / 門檻", expanded=False):
         w = base_cfg["scoring"]["weights"]
-        w_breakout = st.slider("突破 + 量增", 0, 5, int(w["breakout_with_volume"]))
-        w_ma = st.slider("MA 多頭", 0, 5, int(w["ma_bullish"]))
-        w_turnover = st.slider("換手率強勢", 0, 5, int(w["turnover_strong"]))
-        w_kd = st.slider("KD", 0, 5, int(w["kd"]))
-        w_macd = st.slider("MACD", 0, 5, int(w["macd"]))
+        w_breakout = st.slider("突破 + 量增", 0, 5, int(w["breakout_with_volume"]),
+                                 help=HELP["weight_breakout"])
+        w_ma = st.slider("MA 多頭", 0, 5, int(w["ma_bullish"]),
+                          help=HELP["weight_ma_bullish"])
+        w_turnover = st.slider("換手率強勢", 0, 5, int(w["turnover_strong"]),
+                                 help=HELP["weight_turnover_strong"])
+        w_kd = st.slider("KD", 0, 5, int(w["kd"]), help=HELP["weight_kd"])
+        w_macd = st.slider("MACD", 0, 5, int(w["macd"]), help=HELP["weight_macd"])
         max_total = w_breakout + w_ma + w_turnover + w_kd + w_macd
         st.caption(f"總分上限：{max_total}")
 
         thr_enter = st.number_input(
             "進場 ≥", 0, 20,
             st.session_state.get("thr_enter", 6), key="thr_enter",
+            help=HELP["thr_enter"],
         )
         thr_watch = st.number_input(
             "觀察 ≥", 0, 20,
             st.session_state.get("thr_watch", 5), key="thr_watch",
+            help=HELP["thr_watch"],
         )
 
     st.divider()
@@ -1106,7 +1116,7 @@ def render_results_table(df, key_prefix=""):
     sel_signals = fcol1.multiselect(
         "訊號", options=available_signals,
         default=default_signals or available_signals,
-        key=f"{key_prefix}sig",
+        key=f"{key_prefix}sig", help=HELP["signal"],
     )
 
     entry_type_options = []
@@ -1119,11 +1129,13 @@ def render_results_table(df, key_prefix=""):
         default=entry_type_options,
         key=f"{key_prefix}etype",
         disabled=len(entry_type_options) == 0,
+        help=HELP["entry_type"],
     )
 
     max_score = int(df["評分"].max()) if len(df) and "評分" in df.columns else 8
     min_score_filter = fcol3.slider(
         "最低評分", 0, max_score, 0, key=f"{key_prefix}minsc",
+        help=HELP["score"],
     )
     keyword = fcol4.text_input("搜尋", placeholder="股票或公司名",
                                 key=f"{key_prefix}kw")
@@ -1135,7 +1147,7 @@ def render_results_table(df, key_prefix=""):
         risk_max = float(df["風險%"].max())
         risk_range = fr1.slider(
             "風險% 範圍", 0.0, max(risk_max, 50.0), (0.0, max(risk_max, 50.0)),
-            step=1.0, key=f"{key_prefix}risk",
+            step=1.0, key=f"{key_prefix}risk", help=HELP["risk_pct_signal"],
         )
     else:
         risk_range = None
@@ -1144,7 +1156,7 @@ def render_results_table(df, key_prefix=""):
         tr_max = float(df["換手率%"].max())
         tr_range = fr2.slider(
             "換手率% 範圍", 0.0, max(tr_max, 30.0), (0.0, max(tr_max, 30.0)),
-            step=0.5, key=f"{key_prefix}tr",
+            step=0.5, key=f"{key_prefix}tr", help=HELP["turnover_rate"],
         )
     else:
         tr_range = None
@@ -1152,7 +1164,7 @@ def render_results_table(df, key_prefix=""):
     lots_min = fr3.number_input(
         "最少建議張數", min_value=0, value=0, step=1,
         key=f"{key_prefix}lots",
-        help="只看建議買入至少 N 張的（資金不足的會被排除）",
+        help=HELP["suggested_lots"],
     )
     show_full = fr4.toggle("顯示全欄", value=False, key=f"{key_prefix}full")
 
@@ -1214,11 +1226,33 @@ def render_results_table(df, key_prefix=""):
     display = filtered[show_cols]
 
     col_cfg = {}
-    for c in ["風險%", "佔資金%", "換手率%", "20日平均換手率%"]:
+    col_help_map = {
+        "風險%": HELP["risk_pct_signal"],
+        "佔資金%": HELP["cost_pct"],
+        "換手率%": HELP["turnover_rate"],
+        "20日平均換手率%": HELP["turnover_rate"],
+    }
+    for c, h in col_help_map.items():
         if c in display.columns:
-            col_cfg[c] = st.column_config.NumberColumn(c, format="%.2f%%")
+            col_cfg[c] = st.column_config.NumberColumn(c, format="%.2f%%", help=h)
     if "進場成本" in display.columns:
         col_cfg["進場成本"] = st.column_config.NumberColumn("進場成本", format="%d")
+    if "操作建議" in display.columns:
+        col_cfg["操作建議"] = st.column_config.TextColumn("操作建議", help=HELP["action"])
+    if "評分顯示" in display.columns:
+        col_cfg["評分顯示"] = st.column_config.TextColumn("評分顯示", help=HELP["score"])
+    if "RR比" in display.columns:
+        col_cfg["RR比"] = st.column_config.NumberColumn("RR比", help=HELP["rr_ratio"])
+    if "建議張數" in display.columns:
+        col_cfg["建議張數"] = st.column_config.NumberColumn("建議張數", format="%d", help=HELP["suggested_lots"])
+    if "進場類型" in display.columns:
+        col_cfg["進場類型"] = st.column_config.TextColumn("進場類型", help=HELP["entry_type"])
+    if "停損價" in display.columns:
+        col_cfg["停損價"] = st.column_config.NumberColumn("停損價", format="%.2f", help=HELP["stop_loss"])
+    if "目標價1(+1R半倉)" in display.columns:
+        col_cfg["目標價1(+1R半倉)"] = st.column_config.NumberColumn("目標價1(+1R半倉)", format="%.2f", help=HELP["target_1r"])
+    if "目標價2(+2R出清)" in display.columns:
+        col_cfg["目標價2(+2R出清)"] = st.column_config.NumberColumn("目標價2(+2R出清)", format="%.2f", help=HELP["target_2r"])
 
     # 訊號燈號（列底色）— 用「操作建議」分類，永遠存在於 display
     def _row_style(row):
@@ -1324,8 +1358,8 @@ with tab1:
         # 精簡 KPI（4 個）
         s = summary.iloc[0]
         cols = st.columns(4)
-        cols[0].metric("進場候選", int(s.get("進場檔數", 0)))
-        cols[1].metric("觀察", int(s.get("觀察檔數", 0)))
+        cols[0].metric("進場候選", int(s.get("進場檔數", 0)), help=HELP["signal"])
+        cols[1].metric("觀察", int(s.get("觀察檔數", 0)), help=HELP["signal"])
         cols[2].metric("掃描", int(s.get("掃描股票數", 0)))
         cols[3].metric("耗時 (秒)", s.get("執行秒數", "—"))
 
@@ -1417,15 +1451,20 @@ with tab2:
 
     # ============ KPI 列 ============
     kc = st.columns(4)
-    kc[0].metric("持股檔數", len(valid_h))
-    kc[1].metric("總成本", f"{int(total_cost):,}" if total_cost else "—")
-    kc[2].metric("總現值", f"{int(total_value):,}" if total_value else "—")
+    kc[0].metric("持股檔數", len(valid_h),
+                   help="目前持有的股票數量")
+    kc[1].metric("總成本", f"{int(total_cost):,}" if total_cost else "—",
+                   help="所有持股的成本價 × 持有股數加總（元）")
+    kc[2].metric("總現值", f"{int(total_value):,}" if total_value else "—",
+                   help="所有持股的目前價 × 持有股數加總（元）。需先點「分析持股」")
     if total_cost > 0 and h_result:
         kc[3].metric("未實現損益", f"{int(total_pnl):+,}",
                        delta=f"{total_pnl_pct:+.2f}%",
-                       delta_color="normal" if total_pnl >= 0 else "inverse")
+                       delta_color="normal" if total_pnl >= 0 else "inverse",
+                       help="總現值 - 總成本。delta 為損益百分比")
     else:
-        kc[3].metric("未實現損益", "—")
+        kc[3].metric("未實現損益", "—",
+                       help="需先點「分析持股」取得目前價才能計算")
 
     st.markdown("")
 
@@ -1506,10 +1545,11 @@ with tab2:
                 ),
                 "成本價": st.column_config.NumberColumn(
                     "成本價", min_value=0.0, step=0.01, format="%.2f", width="small",
+                    help=HELP["cost_price"],
                 ),
                 "持有股數": st.column_config.NumberColumn(
                     "持有股數", min_value=0, step=100, format="%d", width="small",
-                    help="1 張 = 1000 股",
+                    help=HELP["shares_held"],
                 ),
             },
             key=editor_key,
@@ -1675,14 +1715,31 @@ with tab2:
         avail = [c for c in exit_cols if c in h_df.columns]
         exit_df = h_df[avail].copy()
 
-        # 數值格式化
+        # 數值格式化 + help
         col_cfg_exit = {}
+        exit_help = {
+            "成本價": HELP["cost_price"],
+            "目前價": HELP["current_price"],
+            "停損價": HELP["stop_loss"],
+            "目標1(+1R半倉)": HELP["target_1r"],
+            "目標2(+2R出清)": HELP["target_2r"],
+            "移動停利MA10": HELP["trail_stop_ma10"],
+            "時間停損日": HELP["time_stop"],
+            "技術轉弱觸發": HELP["tech_weak"],
+        }
         for c in ["成本價", "目前價", "停損價", "目標1(+1R半倉)",
                    "目標2(+2R出清)", "移動停利MA10"]:
             if c in exit_df.columns:
-                col_cfg_exit[c] = st.column_config.NumberColumn(c, format="%.2f")
+                col_cfg_exit[c] = st.column_config.NumberColumn(
+                    c, format="%.2f", help=exit_help.get(c),
+                )
         if "報酬%" in exit_df.columns:
-            col_cfg_exit["報酬%"] = st.column_config.NumberColumn("報酬%", format="%.2f%%")
+            col_cfg_exit["報酬%"] = st.column_config.NumberColumn(
+                "報酬%", format="%.2f%%", help=HELP["profit_pct"],
+            )
+        for c in ["時間停損日", "技術轉弱觸發"]:
+            if c in exit_df.columns:
+                col_cfg_exit[c] = st.column_config.TextColumn(c, help=exit_help.get(c))
 
         st.dataframe(exit_df, use_container_width=True, hide_index=True,
                       column_config=col_cfg_exit)
@@ -1714,9 +1771,9 @@ with tab2:
 with tab3:
     st.markdown("### 回測設定")
     bt_c1, bt_c2, bt_c3, bt_c4 = st.columns([1, 1, 1, 1.2])
-    bt_lookback = bt_c1.number_input("回測天數", 30, 500, 120, 30)
-    bt_hold = bt_c2.number_input("持有天數", 3, 60, 10, 1)
-    bt_min_score = bt_c3.number_input("最低評分", 0, 20, 5, 1)
+    bt_lookback = bt_c1.number_input("回測天數", 30, 500, 120, 30, help=HELP["bt_lookback"])
+    bt_hold = bt_c2.number_input("持有天數", 3, 60, 10, 1, help=HELP["bt_hold"])
+    bt_min_score = bt_c3.number_input("最低評分", 0, 20, 5, 1, help=HELP["bt_min_score"])
     bt_c4.markdown("")
     run_bt_btn = bt_c4.button("跑回測", type="primary", use_container_width=True)
 
@@ -1781,16 +1838,20 @@ with tab3:
 
         # KPI
         c = st.columns(4)
-        c[0].metric("總交易數", fmt_int(s["總交易數"]))
+        c[0].metric("總交易數", fmt_int(s["總交易數"]),
+                      help="回測期間累計模擬交易筆數")
         c[1].metric("勝率 %", f"{s['勝率%']}%",
-                     delta=f"{s['勝率%']-50:.1f}%" if s["勝率%"] else None)
-        c[2].metric("平均 R", s["平均R"])
-        c[3].metric("最大回撤 R", s["最大回撤R"])
+                     delta=f"{s['勝率%']-50:.1f}%" if s["勝率%"] else None,
+                     help=HELP["win_rate"])
+        c[2].metric("平均 R", s["平均R"], help=HELP["avg_r"])
+        c[3].metric("最大回撤 R", s["最大回撤R"], help=HELP["max_dd_r"])
 
         c2 = st.columns(3)
-        c2[0].metric("平均報酬 %", f"{s['平均報酬%']}%")
-        c2[1].metric("最大單筆 %", f"{s['最大單筆%']}%")
-        c2[2].metric("期望值 R", s["期望值R"])
+        c2[0].metric("平均報酬 %", f"{s['平均報酬%']}%",
+                       help="每筆交易報酬% 的平均")
+        c2[1].metric("最大單筆 %", f"{s['最大單筆%']}%",
+                       help="所有交易中單筆最大獲利%")
+        c2[2].metric("期望值 R", s["期望值R"], help=HELP["expectancy_r"])
 
         if len(bt["trades"]):
             st.markdown("### 累積 R 與 Drawdown")
