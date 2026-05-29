@@ -1160,10 +1160,27 @@ def render_results_table(df, key_prefix=""):
     if "進場成本" in display.columns:
         col_cfg["進場成本"] = st.column_config.NumberColumn("進場成本", format="%d")
 
-    st.dataframe(
-        display, use_container_width=True, height=500,
-        column_config=col_cfg, hide_index=True,
-    )
+    # 訊號燈號（列底色）
+    def _row_style(row):
+        sig = row.get("訊號判斷", "")
+        # 進場：淺綠；觀察：淺橙；不操作 / 其他：無
+        if sig == "進場":
+            return ["background-color: #ECFDF5"] * len(row)
+        if sig == "觀察":
+            return ["background-color: #FEF3C7"] * len(row)
+        return [""] * len(row)
+
+    try:
+        styled = display.style.apply(_row_style, axis=1)
+        st.dataframe(
+            styled, use_container_width=True, height=500,
+            column_config=col_cfg, hide_index=True,
+        )
+    except Exception:
+        st.dataframe(
+            display, use_container_width=True, height=500,
+            column_config=col_cfg, hide_index=True,
+        )
 
     return filtered
 
@@ -1246,8 +1263,6 @@ with tab1:
         cols[1].metric("觀察", int(s.get("觀察檔數", 0)))
         cols[2].metric("掃描", int(s.get("掃描股票數", 0)))
         cols[3].metric("耗時 (秒)", s.get("執行秒數", "—"))
-
-        render_top_candidates(df, ohlc_map, n=10)
 
         st.markdown("### 完整結果")
         filtered = render_results_table(df, key_prefix="scan_")
