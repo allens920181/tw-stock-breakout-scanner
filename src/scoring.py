@@ -113,38 +113,46 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg, market_state=No
         max_position_pct=ps.get("max_position_pct", 0.20),
     )
 
-    # 停損距離不合理 → 訊號降級為觀察
-    if rr is None and score >= thr["strong"]:
+    # 三級訊號：進場 / 觀察 / 不操作
+    enter_thr = thr.get("enter", thr.get("strong", 6))
+    watch_thr = thr.get("watch", 5)
+
+    if rr is None and score >= enter_thr:
         signal = "觀察"
         status = "成功（停損距離過近）"
     else:
-        if score >= thr["strong"]:
-            signal = "強勢候選"
-        elif score >= thr["watch"]:
+        if score >= enter_thr:
+            signal = "進場"
+        elif score >= watch_thr:
             signal = "觀察"
-        elif score >= thr["weak"]:
-            signal = "偏弱觀察"
         else:
-            signal = "不符合"
+            signal = "不操作"
         status = "成功"
 
-    # ============ 綜合操作建議 ============
+    # ============ 綜合操作建議（簡短）============
     if market_state and market_state["regime"] == "bear":
-        action = "⛔ 大盤空頭 暫不買入"
-    elif pos["suggested_lots"] == 0:
-        action = "⚠️ 不足 1 張 跳過"
-    elif signal == "強勢候選" and entry_info["entry_type"] in ("breakout", "pullback", "base"):
-        action = f"🟢 買入（{entry_info['entry_label']}）"
-    elif signal == "強勢候選":
-        action = "🟡 強勢但無明確進場點"
+        action = "大盤空頭 暫停"
+    elif signal == "進場" and pos["suggested_lots"] == 0:
+        action = "資金不足"
+    elif signal == "進場" and entry_info["entry_type"] in ("breakout", "pullback", "base"):
+        action = f"進場 · {entry_info['entry_label']}"
+    elif signal == "進場":
+        action = "進場 · 無劇本"
     elif signal == "觀察":
-        action = "🟡 觀察"
+        action = "觀察"
     else:
-        action = "🔴 不操作"
+        action = "不操作"
+
+    # 評分顯示 X/Y
+    max_score_total = (
+        weights["breakout_with_volume"] + weights["ma_bullish"]
+        + weights["turnover_strong"] + weights["kd"] + weights["macd"]
+    )
+    score_display = f"{score} / {max_score_total}"
 
     return {
         "股票": symbol, "公司名稱": company_name, "市場": market,
-        "狀態": status, "訊號判斷": signal, "評分": score,
+        "狀態": status, "訊號判斷": signal, "評分": score, "評分顯示": score_display,
 
         "操作建議": action,
         "進場類型": entry_info["entry_label"],

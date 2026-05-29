@@ -24,13 +24,12 @@ def build_dataframes(results, failed_list, stock_count, elapsed_sec):
     summary = pd.DataFrame([{
         "掃描股票數": stock_count,
         "成功分析檔數": int((df.get("狀態", pd.Series(dtype=str)).str.startswith("成功", na=False)).sum()),
-        "強勢候選檔數": _count("強勢候選"),
+        "進場檔數": _count("進場"),
         "觀察檔數": _count("觀察"),
-        "偏弱觀察檔數": _count("偏弱觀察"),
-        "不符合檔數": _count("不符合"),
+        "不操作檔數": _count("不操作"),
         "執行秒數": round(elapsed_sec, 1),
         "策略條件": "突破+量增 / MA多頭 / 換手率強勢 / KD / MACD（加權）",
-        "說明": "v3.1 加權評分 + 品質前置過濾 + RR 合理性檢查",
+        "說明": "v0.4 三級訊號（進場/觀察/不操作）+ Preset",
     }])
 
     failed_df = pd.DataFrame(failed_list)

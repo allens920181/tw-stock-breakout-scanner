@@ -19,7 +19,7 @@ CFG = {
             "kd": 1,
             "macd": 1,
         },
-        "thresholds": {"strong": 6, "watch": 5, "weak": 4},
+        "thresholds": {"enter": 6, "watch": 5},
     },
 }
 
@@ -45,6 +45,7 @@ def test_strong_signal():
     res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=CFG)
     assert res["狀態"].startswith("成功")
     assert res["評分"] >= CFG["scoring"]["thresholds"]["watch"]
+    assert res["訊號判斷"] in ("進場", "觀察")
 
 
 def test_filter_low_price():

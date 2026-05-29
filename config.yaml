@@ -25,9 +25,30 @@ scoring:
     kd: 1                    # K > D 且 K > 70
     macd: 1                  # OSC > 0
   thresholds:
-    strong: 6   # ≥ 6 強勢候選
+    enter: 6    # ≥ 6 進場
     watch: 5    # ≥ 5 觀察
-    weak: 4     # ≥ 4 偏弱觀察
+    # 其他 = 不操作
+
+# 策略 preset（GUI 一鍵套用）
+presets:
+  conservative:
+    label: "保守"
+    filters: {min_price: 30, min_avg_volume: 1500000, require_above_ma60: true, min_risk_pct: 0.03}
+    thresholds: {enter: 7, watch: 6}
+    risk_per_trade_pct: 0.005
+    max_position_pct: 0.10
+  balanced:
+    label: "平衡"
+    filters: {min_price: 10, min_avg_volume: 500000, require_above_ma60: true, min_risk_pct: 0.02}
+    thresholds: {enter: 6, watch: 5}
+    risk_per_trade_pct: 0.01
+    max_position_pct: 0.20
+  aggressive:
+    label: "積極"
+    filters: {min_price: 5, min_avg_volume: 200000, require_above_ma60: false, min_risk_pct: 0.01}
+    thresholds: {enter: 5, watch: 4}
+    risk_per_trade_pct: 0.02
+    max_position_pct: 0.30
 
 # ETF 代號修正表（yfinance 接受的格式）
 etf_fix_map:

@@ -99,12 +99,16 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     )
     emit("完成", 1.0, f"總耗時 {elapsed:.1f} 秒")
 
+    # 為彈窗 K 線圖保留 OHLC（symbol → DataFrame）
+    ohlc_map = {r["symbol"]: r["df"] for r in resolved}
+
     return {
         "df": df,
         "summary": summary,
         "failed_df": failed_df,
         "elapsed_sec": elapsed,
         "market_state": market_state,
+        "ohlc_map": ohlc_map,
     }
 
 
