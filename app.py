@@ -165,6 +165,12 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
     line-height: 1.2;
 }
 
+/* 標題列尾巴的「6/8 · 區間突破」內嵌副標 */
+.cand-meta-inline {
+    color: var(--muted); font-size: 0.78rem;
+    margin-left: 4px; font-variant-numeric: tabular-nums;
+}
+
 /* 卡片內的 metric 拿掉邊框/底色，避免「邊框中的邊框」雙層噪音 */
 [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetric"] {
     background: transparent !important;
@@ -987,17 +993,17 @@ def render_top_candidates(df, ohlc_map, n=10):
         warning = row.get("部位提示", "")
 
         with st.container(border=True):
-            # ===== 標題列：[title] [warning] [詳細] [待處理] =====
+            # ===== 標題列：[code 名稱 chip 評分副標] [warning] [詳細] [待處理] =====
             badge_color = _action_class(action)
             badge_token = {"go": "green", "watch": "orange", "skip": "gray"}.get(badge_color, "gray")
             title_md = (
                 f"**{row['股票']}**  {row['公司名稱']}  "
-                f":{badge_token}-badge[{action}]"
+                f":{badge_token}-badge[{action}]  "
+                f"<span class='cand-meta-inline'>{score_d} · {entry_type}</span>"
             )
 
             hc1, hc_warn, hc2, hc3 = st.columns([5, 2.2, 1, 1])
-            hc1.markdown(title_md)
-            hc1.caption(f"評分 {score_d} · {entry_type}")
+            hc1.markdown(title_md, unsafe_allow_html=True)
             if warning:
                 hc_warn.markdown(f"<div class='cand-warn'>⚠ {warning}</div>",
                                   unsafe_allow_html=True)
