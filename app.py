@@ -1247,6 +1247,8 @@ with tab1:
         cols[2].metric("掃描", int(s.get("掃描股票數", 0)))
         cols[3].metric("耗時 (秒)", s.get("執行秒數", "—"))
 
+        render_top_candidates(df, ohlc_map, n=10)
+
         st.markdown("### 完整結果")
         filtered = render_results_table(df, key_prefix="scan_")
 
