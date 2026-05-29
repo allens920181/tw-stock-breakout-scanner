@@ -358,6 +358,33 @@ def fmt_money(n):
         return str(n)
 
 
+@st.cache_data
+def make_stock_list_template():
+    """股票清單上傳模板"""
+    df = pd.DataFrame([
+        {"股票代號": "2330", "公司名稱": "台積電"},
+        {"股票代號": "2317", "公司名稱": "鴻海"},
+        {"股票代號": "0050", "公司名稱": "元大台灣50"},
+    ])
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, sheet_name="股票清單", index=False)
+    return buf.getvalue()
+
+
+@st.cache_data
+def make_holdings_template():
+    """持股上傳模板"""
+    df = pd.DataFrame([
+        {"股票代號": "2330", "公司名稱": "台積電", "成本價": 1000.00, "持有股數": 1000},
+        {"股票代號": "0050", "公司名稱": "元大台灣50", "成本價": 220.50, "持有股數": 2000},
+    ])
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, sheet_name="持股", index=False)
+    return buf.getvalue()
+
+
 # =====================================================
 # Preset application logic
 # =====================================================
@@ -425,8 +452,17 @@ with st.sidebar:
     mode = "掃描全台股" if source == "universe" else "上傳清單"
 
     if source == "upload":
-        uploaded = st.file_uploader(
-            "上傳 xlsx", type=["xlsx"], label_visibility="collapsed",
+        upl_c1, upl_c2 = st.columns([3, 2])
+        with upl_c1:
+            uploaded = st.file_uploader(
+                "上傳 xlsx", type=["xlsx"], label_visibility="collapsed",
+            )
+        upl_c2.download_button(
+            "下載模板",
+            data=make_stock_list_template(),
+            file_name="股票清單_模板.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
         if not uploaded:
             st.caption("欄位需含：股票代號 / 公司名稱")
@@ -1317,7 +1353,7 @@ with tab2:
     th1.caption("代號填了，公司名稱會自動帶入。儲存在瀏覽器 session — 刷新會清空，記得「匯出」備份。")
 
     with th2:
-        tt = st.columns(3)
+        tt = st.columns(4)
         if tt[0].button("清空", use_container_width=True):
             st.session_state["holdings_df"] = pd.DataFrame(columns=[
                 "股票代號", "公司名稱", "成本價", "持有股數",
@@ -1357,6 +1393,13 @@ with tab2:
                     st.success(f"已載入 {len(up_df)} 筆")
                 except Exception as e:
                     st.error(f"讀取失敗：{e}")
+        tt[3].download_button(
+            "模板",
+            data=make_holdings_template(),
+            file_name="持股_模板.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
 
     # ============ 編輯器（fragment 隔離 rerun，不在 render 中重設 data 源）============
     # editor_version 用來在「清空 / 上傳 / 查詢名稱」後重置編輯器
