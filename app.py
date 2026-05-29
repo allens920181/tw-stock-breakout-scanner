@@ -16,6 +16,7 @@ import streamlit as st
 from src.config import load_config
 from src.report import write_excel
 from src.runner import run_scan
+from src.universe import fetch_twse_universe
 
 
 # =====================================================
@@ -48,17 +49,38 @@ base_cfg = get_base_config()
 with st.sidebar:
     st.header("⚙️ 設定")
 
-    uploaded = st.file_uploader(
-        "上傳股票清單 (xlsx)",
-        type=["xlsx"],
-        help="欄位需含「股票代號」與「公司名稱」",
+    mode = st.radio(
+        "資料來源",
+        ["上傳清單", "掃描全台股"],
+        horizontal=True,
     )
 
-    use_default = st.checkbox(
-        "使用專案內 stock_list.xlsx",
-        value=not uploaded,
-        disabled=bool(uploaded),
-    )
+    uploaded = None
+    use_default = False
+    universe_kind = "twse"
+
+    if mode == "上傳清單":
+        uploaded = st.file_uploader(
+            "上傳股票清單 (xlsx)",
+            type=["xlsx"],
+            help="欄位需含「股票代號」與「公司名稱」",
+        )
+        use_default = st.checkbox(
+            "使用專案內 stock_list.xlsx",
+            value=not uploaded,
+            disabled=bool(uploaded),
+        )
+    else:
+        universe_kind = st.selectbox(
+            "範圍",
+            ["twse", "twse-common", "twse-etf"],
+            format_func=lambda x: {
+                "twse": "上市普通股 + ETF",
+                "twse-common": "僅普通股",
+                "twse-etf": "僅 ETF",
+            }[x],
+        )
+        st.caption("⏱️ 全市場掃描首次約 5~15 分鐘；同日重跑 < 1 分鐘（快取）")
 
     st.divider()
     st.subheader("品質過濾")
@@ -143,8 +165,22 @@ class StListHandler(logging.Handler):
 # 執行掃描
 # =====================================================
 if run_btn:
-    # 決定 input 路徑
-    if uploaded:
+    input_path = None
+    items = None
+
+    if mode == "掃描全台股":
+        try:
+            with st.spinner("抓取全台股清單 ..."):
+                raw = fetch_twse_universe(
+                    include_common=universe_kind in ("twse", "twse-common"),
+                    include_etf=universe_kind in ("twse", "twse-etf"),
+                )
+            items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
+            st.info(f"📌 將掃描 **{len(items)}** 檔")
+        except Exception as e:
+            st.error(f"抓取全台股清單失敗：{e}")
+            st.stop()
+    elif uploaded:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         tmp.write(uploaded.getvalue())
         tmp.close()
@@ -177,7 +213,10 @@ if run_btn:
 
     try:
         with st.spinner("掃描中 ..."):
-            result = run_scan(input_path, cfg, progress_cb=on_progress)
+            result = run_scan(
+                input_path=input_path, cfg=cfg,
+                progress_cb=on_progress, items=items,
+            )
     except Exception as e:
         st.error(f"執行失敗：{e}")
         st.exception(e)

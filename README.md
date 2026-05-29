@@ -33,9 +33,22 @@ uv run streamlit run app.py
 ### 方式 B — CLI
 
 ```bash
-uv run python main.py
-uv run python main.py -i my_list.xlsx -c my_config.yaml --min-score 5 --log-file run.log
+# 用本地清單
+uv run python main.py -i stock_list.xlsx
+
+# 掃描全台股（上市+ETF，自動抓 TWSE OpenAPI）
+uv run python main.py --universe twse
+
+# 僅 ETF
+uv run python main.py --universe twse-etf
 ```
+
+## 掃描全台股
+
+由 [TWSE OpenAPI](https://openapi.twse.com.tw) 抓當日所有上市證券，自動過濾 TDR/特別股/受益證券。
+首次約 **5~15 分鐘**（含批次下載 + 抓股數），同日重跑 **<1 分鐘**（讀本地 Parquet 快取）。
+
+GUI 端在側欄選「掃描全台股」即可。
 
 報告輸出檔名格式：`台股全部分析報告_自動判斷市場_YYYYMMDD_HHMMSS.xlsx`
 

@@ -6,6 +6,8 @@ data:
   period: "1y"           # yfinance 下載期間
   cache_dir: ".cache"
   max_workers: 8         # 平行抓股數的執行緒數
+  chunk_size: 50         # 批次下載每批檔數
+  chunk_sleep: 1.0       # 批次間 sleep 秒數（避免 rate-limit）
 
 # 品質前置過濾（不符合直接歸類「不分析」）
 filters:

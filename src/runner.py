@@ -14,9 +14,10 @@ from .scoring import analyze_stock
 log = logging.getLogger(__name__)
 
 
-def run_scan(input_path, cfg, progress_cb=None):
+def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     """
     progress_cb(stage: str, pct: float, message: str) — 可選回呼
+    items: 可選；直接傳入 [{code, company_name}] 跳過 Excel 讀取
 
     Returns: dict 含 df / summary / failed_df / elapsed_sec
     """
@@ -31,13 +32,16 @@ def run_scan(input_path, cfg, progress_cb=None):
     t0 = time.time()
     cache_mod.ensure_dir(cfg["data"]["cache_dir"])
 
-    emit("讀取清單", 0.05, f"讀取 {input_path}")
-    items = load_stock_list(input_path, cfg["etf_fix_map"])
+    if items is None:
+        emit("讀取清單", 0.05, f"讀取 {input_path}")
+        items = load_stock_list(input_path, cfg["etf_fix_map"])
     emit("讀取清單", 0.10, f"讀入 {len(items)} 檔")
 
     emit("下載資料", 0.15, "批次下載 OHLC ...")
     resolved, not_found = resolve_markets_and_data(
         items, cfg["data"]["period"], cfg["data"]["cache_dir"],
+        chunk_size=cfg["data"].get("chunk_size", 50),
+        chunk_sleep=cfg["data"].get("chunk_sleep", 1.0),
     )
     emit("下載資料", 0.50, f"定位 {len(resolved)} 檔，{len(not_found)} 檔失敗")
 

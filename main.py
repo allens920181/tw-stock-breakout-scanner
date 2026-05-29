@@ -5,6 +5,7 @@ import sys
 from src.config import load_config
 from src.report import write_excel
 from src.runner import run_scan
+from src.universe import fetch_twse_universe
 
 
 def setup_logging(level, log_file=None):
@@ -19,6 +20,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="台股強勢突破交易清單掃描器")
     p.add_argument("--input", "-i", default="stock_list.xlsx")
     p.add_argument("--config", "-c", default="config.yaml")
+    p.add_argument("--universe", choices=["twse", "twse-common", "twse-etf"],
+                   default=None,
+                   help="掃描全台股：twse=上市+ETF, twse-common=僅普通股, twse-etf=僅ETF")
     p.add_argument("--min-score", type=int, default=None)
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -31,7 +35,17 @@ def main():
     setup_logging(args.log_level, args.log_file)
 
     cfg = load_config(args.config)
-    result = run_scan(args.input, cfg)
+
+    if args.universe:
+        include_common = args.universe in ("twse", "twse-common")
+        include_etf = args.universe in ("twse", "twse-etf")
+        items = fetch_twse_universe(
+            include_common=include_common, include_etf=include_etf,
+        )
+        items = [{"code": x["code"], "company_name": x["company_name"]} for x in items]
+        result = run_scan(cfg=cfg, items=items)
+    else:
+        result = run_scan(args.input, cfg)
 
     df = result["df"]
     if args.min_score is not None:

@@ -54,22 +54,47 @@ def _split_multi(df_multi, symbols):
     return out
 
 
-def batch_download(symbols, period):
+def batch_download(symbols, period, chunk_size=50, sleep_between=1.0, progress_cb=None):
+    """
+    分批下載避免被 Yahoo rate-limit。
+    progress_cb(done, total) — 可選回呼
+    """
     if not symbols:
         return {}
-    df = yf.download(
-        tickers=symbols,
-        period=period,
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        group_by="ticker",
-        threads=True,
-    )
-    return _split_multi(df, symbols)
+
+    result = {}
+    total = len(symbols)
+    for i in range(0, total, chunk_size):
+        chunk = symbols[i:i + chunk_size]
+        try:
+            df = yf.download(
+                tickers=chunk,
+                period=period,
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                group_by="ticker",
+                threads=True,
+            )
+            result.update(_split_multi(df, chunk))
+        except Exception as e:
+            log.warning("批次下載失敗（%d~%d）：%s", i, i + len(chunk), e)
+
+        done = min(i + chunk_size, total)
+        log.info("批次下載進度 %d/%d", done, total)
+        if progress_cb:
+            try:
+                progress_cb(done, total)
+            except Exception:
+                pass
+
+        if i + chunk_size < total:
+            time.sleep(sleep_between)
+
+    return result
 
 
-def resolve_markets_and_data(items, period, cache_dir):
+def resolve_markets_and_data(items, period, cache_dir, chunk_size=50, chunk_sleep=1.0):
     """
     回傳 (resolved, not_found)
       resolved: list[{symbol, company_name, market, df}]
@@ -96,7 +121,7 @@ def resolve_markets_and_data(items, period, cache_dir):
 
     log.info("批次下載 .TW %d 檔", len(pending_tw))
     tw_symbols = [x[0] for x in pending_tw]
-    tw_data = batch_download(tw_symbols, period)
+    tw_data = batch_download(tw_symbols, period, chunk_size, chunk_sleep)
 
     pending_two_map = {}
     for sym, name, code in pending_tw:
