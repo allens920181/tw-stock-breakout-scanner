@@ -132,37 +132,52 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .banner b { font-weight: 600; }
 .banner .sep { color: var(--border); margin: 0 4px; }
 
-.card {
+/* 卡片容器（包住整個 row：header + grid + buttons） */
+.candidate-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 8px;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 4px;
 }
-.card.go    { border-left: 3px solid var(--positive); }
-.card.watch { border-left: 3px solid var(--warning); }
-.card.skip  { border-left: 3px solid var(--subtle); }
+.candidate-wrap.go    { border-left: 3px solid var(--positive); }
+.candidate-wrap.watch { border-left: 3px solid var(--warning); }
+.candidate-wrap.skip  { border-left: 3px solid var(--subtle); }
 
-.card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
-.card-title { font-size: 0.95rem; font-weight: 600; }
-.card-title .code { font-family: 'JetBrains Mono', monospace; color: var(--muted); margin-right: 6px; font-size: 0.85rem; }
-.card-meta { color: var(--muted); font-size: 0.78rem; }
-.card-action {
-    font-size: 0.75rem; font-weight: 500;
-    padding: 2px 8px; border-radius: 12px;
+/* 標題列 */
+.cand-title { font-size: 0.92rem; font-weight: 600; line-height: 1.4; }
+.cand-title .code { font-family: 'JetBrains Mono', monospace; color: var(--muted); margin-right: 6px; font-size: 0.82rem; }
+.cand-meta { color: var(--muted); font-size: 0.72rem; margin-top: 1px; }
+.cand-action {
+    font-size: 0.72rem; font-weight: 500;
+    padding: 2px 8px; border-radius: 10px;
     background: var(--slate-2); color: var(--slate);
+    display: inline-block;
 }
-.card-action.go    { background: var(--positive-2); color: var(--positive); }
-.card-action.watch { background: var(--warning-2); color: var(--warning); }
-.card-action.skip  { background: var(--slate-2); color: var(--slate); }
+.cand-action.go    { background: var(--positive-2); color: var(--positive); }
+.cand-action.watch { background: var(--warning-2); color: var(--warning); }
+.cand-action.skip  { background: var(--slate-2); color: var(--slate); }
 
-.card-grid {
+/* 數據格 */
+.cand-grid {
     display: grid; grid-template-columns: repeat(7, 1fr);
-    gap: 8px 16px; margin-top: 10px; font-size: 0.82rem;
+    gap: 4px 12px; margin-top: 6px; font-size: 0.78rem;
 }
-.card-grid .label { color: var(--muted); font-size: 0.72rem; margin-bottom: 2px; }
-.card-grid .value { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.warn-text { color: var(--warning); font-size: 0.75rem; margin-top: 6px; }
+.cand-grid .label { color: var(--muted); font-size: 0.66rem; line-height: 1; margin-bottom: 1px; }
+.cand-grid .value { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.warn-text { color: var(--warning); font-size: 0.72rem; margin-top: 4px; }
+
+/* 卡片內按鈕緊湊化 */
+.candidate-wrap .stButton button {
+    padding: 2px 8px !important;
+    min-height: 0 !important;
+    height: 26px !important;
+    font-size: 0.75rem !important;
+    line-height: 1 !important;
+}
+.candidate-wrap [data-testid="column"] { padding: 0 !important; }
+.candidate-wrap [data-testid="stHorizontalBlock"] { gap: 6px !important; align-items: center; }
+.candidate-wrap [data-testid="stMarkdownContainer"] { line-height: 1.2; }
 
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
@@ -945,48 +960,53 @@ def render_top_candidates(df, ohlc_map, n=10):
         tr_label = _turnover_label(turnover)
         tr_str = (
             f"<span style='color:{tr_color};'>{turnover}%</span>"
-            f" <span style='color:#94A3B8; font-size:0.7rem;'>{tr_label}</span>"
+            f" <span style='color:#94A3B8; font-size:0.66rem;'>{tr_label}</span>"
             if turnover is not None and pd.notna(turnover) else "—"
         )
         warn_html = f"<div class='warn-text'>{warning}</div>" if warning else ""
         action_tip = _action_tooltip(action)
 
-        st.markdown(
-            f"""
-<div class='card {cls}'>
-  <div class='card-head'>
-    <div class='card-title'>
-      <span class='code'>{row['股票']}</span>{row['公司名稱']}
-    </div>
-    <div class='card-action {cls}' title='{action_tip}'>{action}</div>
-  </div>
-  <div class='card-meta'>評分 {score_d} · {entry_type}</div>
-  <div class='card-grid'>
-    <div><div class='label'>進場</div><div class='value'>{entry}</div></div>
-    <div><div class='label'>停損</div><div class='value'>{stop}</div></div>
-    <div><div class='label'>目標 1</div><div class='value'>{t1}</div></div>
-    <div><div class='label'>目標 2</div><div class='value'>{t2}</div></div>
-    <div><div class='label'>風險</div><div class='value'>{risk_pct_val}%</div></div>
-    <div><div class='label'>建議</div><div class='value'>{lots} 張 · {cost_pct}%</div></div>
-    <div><div class='label'>換手率</div><div class='value'>{tr_str}</div></div>
-  </div>
-  {warn_html}
-</div>
-""",
+        # 開啟卡片容器
+        st.markdown(f"<div class='candidate-wrap {cls}'>", unsafe_allow_html=True)
+
+        # 標題列：[名稱 + 副標] [action chip] [詳細] [待處理]
+        hcols = st.columns([5, 1.4, 0.8, 0.9])
+        hcols[0].markdown(
+            f"<div class='cand-title'>"
+            f"<span class='code'>{row['股票']}</span>{row['公司名稱']}"
+            f"</div>"
+            f"<div class='cand-meta'>評分 {score_d} · {entry_type}</div>",
             unsafe_allow_html=True,
         )
-        btn_c1, btn_c2, _ = st.columns([1, 1, 5])
-        if btn_c1.button("詳細", key=f"detail_{idx}_{row['股票']}",
-                          use_container_width=True):
+        hcols[1].markdown(
+            f"<div class='cand-action {cls}' title='{action_tip}'>{action}</div>",
+            unsafe_allow_html=True,
+        )
+        if hcols[2].button("詳細", key=f"detail_{idx}_{row['股票']}",
+                            use_container_width=True):
             show_detail_dialog(row, ohlc_map)
-        if btn_c2.button("待處理", key=f"watch_{idx}_{row['股票']}",
-                          use_container_width=True):
+        if hcols[3].button("待處理", key=f"watch_{idx}_{row['股票']}",
+                            use_container_width=True):
             added = add_to_watchlist(row["股票"], row["公司名稱"],
                                        row.get("進場參考價", 0),
                                        row.get("建議張數", 1))
             if added:
                 st.toast("已加入待處理", icon="·")
                 st.rerun()
+
+        # 資料 grid
+        st.markdown(
+            f"""<div class='cand-grid'>
+  <div><div class='label'>進場</div><div class='value'>{entry}</div></div>
+  <div><div class='label'>停損</div><div class='value'>{stop}</div></div>
+  <div><div class='label'>目標 1</div><div class='value'>{t1}</div></div>
+  <div><div class='label'>目標 2</div><div class='value'>{t2}</div></div>
+  <div><div class='label'>風險</div><div class='value'>{risk_pct_val}%</div></div>
+  <div><div class='label'>建議</div><div class='value'>{lots} 張 · {cost_pct}%</div></div>
+  <div><div class='label'>換手率</div><div class='value'>{tr_str}</div></div>
+</div>{warn_html}</div>""",
+            unsafe_allow_html=True,
+        )
 
 
 def render_results_table(df, key_prefix=""):
