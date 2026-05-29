@@ -389,18 +389,22 @@ if "watchlist" not in st.session_state:
 # =====================================================
 with st.sidebar:
     st.markdown("### 風格 Preset")
-    ps_cols = st.columns(3)
-    for i, key in enumerate(["conservative", "balanced", "aggressive"]):
-        label = base_cfg["presets"][key]["label"]
-        is_active = st.session_state.get("preset") == key
-        if ps_cols[i].button(
-            label,
-            type="primary" if is_active else "secondary",
-            use_container_width=True,
-            key=f"preset_{key}",
-        ):
-            apply_preset(key)
-            st.rerun()
+    preset_options = {
+        "conservative": base_cfg["presets"]["conservative"]["label"],
+        "balanced": base_cfg["presets"]["balanced"]["label"],
+        "aggressive": base_cfg["presets"]["aggressive"]["label"],
+    }
+    current_preset = st.session_state.get("preset", "balanced")
+    selected_preset = st.segmented_control(
+        "風格 Preset",
+        options=list(preset_options.keys()),
+        format_func=lambda k: preset_options[k],
+        default=current_preset,
+        label_visibility="collapsed",
+    )
+    if selected_preset and selected_preset != current_preset:
+        apply_preset(selected_preset)
+        st.rerun()
 
     st.markdown("### 資料來源")
 
