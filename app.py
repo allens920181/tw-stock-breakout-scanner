@@ -25,7 +25,10 @@ from src.market import classify_market
 from src.name_lookup import lookup_names
 from src.preferences import load_prefs, save_prefs
 from src.report import write_excel
-from src.runner import run_backtest, run_holdings_scan, run_scan, run_sensitivity
+from src.runner import (
+    run_backtest, run_factor_eval, run_holdings_scan, run_plateau,
+    run_scan, run_sensitivity,
+)
 from src.universe import fetch_twse_universe
 
 
@@ -534,15 +537,26 @@ with st.sidebar:
 
     with st.expander("評分權重 / 門檻", expanded=False):
         w = base_cfg["scoring"]["weights"]
-        w_breakout = st.slider("突破 + 量增", 0, 5, int(w["breakout_with_volume"]),
-                                 help=HELP["weight_breakout"])
-        w_ma = st.slider("MA 多頭", 0, 5, int(w["ma_bullish"]),
-                          help=HELP["weight_ma_bullish"])
-        w_turnover = st.slider("換手率強勢", 0, 5, int(w["turnover_strong"]),
-                                 help=HELP["weight_turnover_strong"])
-        w_kd = st.slider("KD", 0, 5, int(w["kd"]), help=HELP["weight_kd"])
-        w_macd = st.slider("MACD", 0, 5, int(w["macd"]), help=HELP["weight_macd"])
-        max_total = w_breakout + w_ma + w_turnover + w_kd + w_macd
+        w_breakout = st.slider("突破 + 量增", 0, 5,
+                                 st.session_state.get("w_breakout", int(w["breakout_with_volume"])),
+                                 key="w_breakout", help=HELP["weight_breakout"])
+        w_ma = st.slider("MA 多頭", 0, 5,
+                          st.session_state.get("w_ma", int(w["ma_bullish"])),
+                          key="w_ma", help=HELP["weight_ma_bullish"])
+        w_turnover = st.slider("換手率強勢", 0, 5,
+                                 st.session_state.get("w_turnover", int(w["turnover_strong"])),
+                                 key="w_turnover", help=HELP["weight_turnover_strong"])
+        w_kd = st.slider("KD", 0, 5, st.session_state.get("w_kd", int(w["kd"])),
+                          key="w_kd", help=HELP["weight_kd"])
+        w_macd = st.slider("MACD", 0, 5, st.session_state.get("w_macd", int(w["macd"])),
+                            key="w_macd", help=HELP["weight_macd"])
+        w_rs = st.slider("相對強度 RS", 0, 5,
+                          st.session_state.get("w_rs", int(w.get("rel_strength", 1))),
+                          key="w_rs", help=HELP["weight_rel_strength"])
+        w_trend = st.slider("趨勢確認", 0, 5,
+                             st.session_state.get("w_trend", int(w.get("trend_confirm", 1))),
+                             key="w_trend", help=HELP["weight_trend_confirm"])
+        max_total = w_breakout + w_ma + w_turnover + w_kd + w_macd + w_rs + w_trend
         st.caption(f"總分上限：{max_total}")
 
         thr_enter = st.number_input(
@@ -620,6 +634,8 @@ def build_cfg():
         "turnover_strong": w_turnover,
         "kd": w_kd,
         "macd": w_macd,
+        "rel_strength": w_rs,
+        "trend_confirm": w_trend,
     }
     cfg["scoring"]["thresholds"] = {
         "enter": thr_enter, "watch": thr_watch,
@@ -629,6 +645,14 @@ def build_cfg():
         "risk_per_trade_pct": risk_pct,
         "lot_size": 1000,
         "max_position_pct": max_pos_pct,
+    }
+    base_costs = base_cfg.get("costs", {})
+    cfg["costs"] = {
+        "enabled": bool(st.session_state.get("cost_enabled", base_costs.get("enabled", True))),
+        "fee_rate": float(st.session_state.get("cost_fee", base_costs.get("fee_rate", 0.001425) * 100)) / 100,
+        "fee_discount": float(st.session_state.get("cost_disc", base_costs.get("fee_discount", 1.0))),
+        "tax_rate": float(st.session_state.get("cost_tax", base_costs.get("tax_rate", 0.003) * 100)) / 100,
+        "apply_to_factor_eval": bool(st.session_state.get("cost_apply_fe", base_costs.get("apply_to_factor_eval", False))),
     }
     return cfg
 
@@ -1066,6 +1090,8 @@ def render_top_candidates(df, ohlc_map, n=10):
     for idx, (_, row) in enumerate(top.iterrows()):
         action = str(row.get("操作建議", ""))
         entry = row.get("進場參考價", "—")
+        cur_price = row.get("目前現價", None)
+        price_dev = row.get("現價偏離%", None)
         stop = row.get("停損價", "—")
         t1 = row.get("目標價1(+1R半倉)", "—")
         t2 = row.get("目標價2(+2R出清)", "—")
@@ -1112,7 +1138,10 @@ def render_top_candidates(df, ohlc_map, n=10):
             tr_value = f"{turnover}%" if turnover is not None and pd.notna(turnover) else "—"
             tr_label = _turnover_label(turnover) if turnover is not None and pd.notna(turnover) else ""
 
+            cur_val = f"{cur_price}" if cur_price is not None and pd.notna(cur_price) else "—"
+            cur_sub = f"{price_dev:+.1f}%" if price_dev is not None and pd.notna(price_dev) else None
             cells = [
+                ("現價",   cur_val,        cur_sub),
                 ("進場",   entry,          None),
                 ("停損",   stop,           None),
                 ("目標 1", t1,             None),
@@ -1121,7 +1150,7 @@ def render_top_candidates(df, ohlc_map, n=10):
                 ("建議",   f"{lots_int} 張", f"{cost_pct}% 資金"),
                 ("換手率", tr_value,       tr_label or None),
             ]
-            mcols = st.columns(7)
+            mcols = st.columns(8)
             for i, (lab, val, sub) in enumerate(cells):
                 sub_html = f"<div class='cell-sub'>{sub}</div>" if sub else ""
                 mcols[i].markdown(
@@ -1237,16 +1266,21 @@ def render_results_table(df, key_prefix=""):
     # 精簡欄位（預設）
     minimal_cols = [
         "股票", "公司名稱", "操作建議", "評分顯示",
-        "進場參考價", "停損價", "目標價1(+1R半倉)",
-        "風險%", "建議張數", "換手率%",
+        "目前現價", "進場參考價", "現價偏離%", "停損價", "目標價1(+1R半倉)",
+        "風險%", "建議張數", "換手率%", "籌碼確認",
     ]
     full_priority = minimal_cols + [
         "進場類型", "進場條件", "進場成本", "佔資金%", "部位提示",
+        "法人連買天數", "法人買賣超(張)", "外資買賣超(張)", "法人5日累計(張)",
+        "融資券提示", "融資增減%", "券資比%",
+        "財報日", "距財報日",
+        "產業", "族群同步", "族群強勢檔數",
+        "相對強度RS%", "趨勢確認", "ADX", "乖離MA20%", "大盤確認(FTD)",
         "市場", "訊號判斷", "評分", "收盤價",
-        "目標價2(+2R出清)", "RR比",
+        "目標價2(+2R出清)", "RR比", "ATR14",
         "20日平均換手率%", "MA5", "MA20", "MA60", "K", "D", "OSC",
-        "成交量", "20日均量",
-        "突破+量增", "MA多頭", "換手率強勢", "KD強勢", "MACD多方",
+        "成交量", "20日均量", "50日均量",
+        "突破+量增", "MA多頭", "換手率強勢", "KD強勢", "MACD多方", "相對強度",
         "大盤狀態", "狀態",
     ]
     target_cols = full_priority if show_full else minimal_cols
@@ -1262,6 +1296,11 @@ def render_results_table(df, key_prefix=""):
         "佔資金%": HELP["cost_pct"],
         "換手率%": HELP["turnover_rate"],
         "20日平均換手率%": HELP["turnover_rate"],
+        "現價偏離%": "目前現價相對進場參考價的偏離；>+5% 會降為觀察（追高風險）",
+        "相對強度RS%": HELP["weight_rel_strength"],
+        "乖離MA20%": "進場參考價相對 MA20 的乖離；≥+10% 視為過度延伸（追高）降為觀察",
+        "ADX": "趨勢強度指標；>20 視為趨勢成形，>40 強勁",
+        "ATR14": "14 日平均真實波幅；停損 = 進場價 - ATR×倍數，使各股風險距離一致",
     }
     for c, h in col_help_map.items():
         if c in display.columns:
@@ -1284,6 +1323,31 @@ def render_results_table(df, key_prefix=""):
         col_cfg["目標價1(+1R半倉)"] = st.column_config.NumberColumn("目標價1(+1R半倉)", format="%.2f", help=HELP["target_1r"])
     if "目標價2(+2R出清)" in display.columns:
         col_cfg["目標價2(+2R出清)"] = st.column_config.NumberColumn("目標價2(+2R出清)", format="%.2f", help=HELP["target_2r"])
+    if "籌碼確認" in display.columns:
+        col_cfg["籌碼確認"] = st.column_config.TextColumn("籌碼確認", help=HELP["chip_confirm"])
+    for cc in ("法人買賣超(張)", "外資買賣超(張)", "法人5日累計(張)"):
+        if cc in display.columns:
+            col_cfg[cc] = st.column_config.NumberColumn(
+                cc, format="%d",
+                help=HELP["chip_foreign"] if "外資" in cc else HELP["chip_inst"],
+            )
+    if "法人連買天數" in display.columns:
+        col_cfg["法人連買天數"] = st.column_config.NumberColumn(
+            "法人連買天數", format="%d", help=HELP["chip_streak"])
+    if "融資券提示" in display.columns:
+        col_cfg["融資券提示"] = st.column_config.TextColumn("融資券提示", help=HELP["margin_flag"])
+    if "融資增減%" in display.columns:
+        col_cfg["融資增減%"] = st.column_config.NumberColumn("融資增減%", format="%.2f%%", help=HELP["margin_chg"])
+    if "券資比%" in display.columns:
+        col_cfg["券資比%"] = st.column_config.NumberColumn("券資比%", format="%.2f%%", help=HELP["short_ratio"])
+    if "族群同步" in display.columns:
+        col_cfg["族群同步"] = st.column_config.TextColumn("族群同步", help=HELP["group_sync"])
+    if "族群強勢檔數" in display.columns:
+        col_cfg["族群強勢檔數"] = st.column_config.NumberColumn("族群強勢檔數", format="%d", help=HELP["group_sync"])
+    if "財報日" in display.columns:
+        col_cfg["財報日"] = st.column_config.TextColumn("財報日", help=HELP["earnings_blackout"])
+    if "距財報日" in display.columns:
+        col_cfg["距財報日"] = st.column_config.NumberColumn("距財報日", format="%d", help=HELP["earnings_blackout"])
 
     # 訊號燈號（列底色）— 用「操作建議」分類，永遠存在於 display
     def _row_style(row):
@@ -1808,6 +1872,25 @@ with tab3:
     bt_c4.markdown("")
     run_bt_btn = bt_c4.button("跑回測", type="primary", use_container_width=True)
 
+    _bc = base_cfg.get("costs", {})
+    with st.expander("交易成本（讓回測說真話）", expanded=False):
+        st.caption("台股來回成本約 0.45–0.6%：未計成本的期望值是虛胖的。")
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        cc1.checkbox("計入交易成本", value=_bc.get("enabled", True), key="cost_enabled")
+        cc2.number_input("手續費率 %", 0.0, 0.5,
+                         _bc.get("fee_rate", 0.001425) * 100, 0.01, key="cost_fee")
+        cc3.number_input("券商折數", 0.1, 1.0,
+                         float(_bc.get("fee_discount", 1.0)), 0.05, key="cost_disc")
+        cc4.number_input("證交稅 %", 0.0, 0.5,
+                         _bc.get("tax_rate", 0.003) * 100, 0.05, key="cost_tax")
+        st.checkbox("因子驗證也扣成本", value=_bc.get("apply_to_factor_eval", False),
+                    key="cost_apply_fe",
+                    help="預設關閉，避免因子 lift 與回測雙重成本口徑混淆")
+        _rt = (st.session_state.get("cost_fee", 0.1425) / 100
+               * st.session_state.get("cost_disc", 1.0) * 2
+               + st.session_state.get("cost_tax", 0.3) / 100)
+        st.caption(f"估計來回成本率 ≈ {_rt*100:.2f}%（買賣手續費 + 賣出證交稅）")
+
     if run_bt_btn:
         bt_items = None
         bt_input = None
@@ -1864,6 +1947,8 @@ with tab3:
         s = bt["summary"]
 
         # Edge 燈號條（全寬）
+        _costs_on = st.session_state.get("cost_enabled", True)
+        st.caption("📊 報酬已扣來回交易成本" if _costs_on else "⚠ 未計交易成本（期望值偏樂觀）")
         render_edge_meter(s["期望值R"])
         st.markdown("")
 
@@ -1883,6 +1968,71 @@ with tab3:
         c2[1].metric("最大單筆 %", f"{s['最大單筆%']}%",
                        help="所有交易中單筆最大獲利%")
         c2[2].metric("期望值 R", s["期望值R"], help=HELP["expectancy_r"])
+
+        # 統計顯著性
+        if "期望值R_CI下界" in s:
+            ci_txt = f"期望值R 95% CI = [{s['期望值R_CI下界']}, {s['期望值R_CI上界']}]"
+            if s.get("顯著正Edge"):
+                st.success(f"✅ {ci_txt}（下界 > 0，達顯著正 edge）")
+            else:
+                st.warning(f"⚠ {ci_txt}（CI 跨 0，未達顯著 — 勿據此調參）")
+            if s.get("樣本警示"):
+                st.warning(f"⚠ 樣本可信度：{s.get('樣本可信度', '')} — 統計噪音大，勿過度解讀")
+            else:
+                st.caption(f"樣本可信度：{s.get('樣本可信度', '')}")
+
+        # 樣本外（OOS）驗證 — 最能代表真實期望值
+        oos_split = bt.get("oos_split")
+        if oos_split and oos_split.get("n_oos", 0) > 0:
+            oos = oos_split["oos"]
+            st.markdown("#### 🎯 樣本外（OOS）— 只信這個")
+            st.caption("用前段資料挑參數、後段驗證；OOS 期望值才避開了選參偏誤。")
+            oc = st.columns(4)
+            oc[0].metric("OOS 交易數", fmt_int(oos["總交易數"]))
+            oc[1].metric("OOS 勝率 %", f"{oos['勝率%']}%")
+            oc[2].metric("OOS 平均 R", oos["平均R"])
+            oc[3].metric("OOS 期望值 R", oos["期望值R"])
+            if oos_split["n_oos"] < 30:
+                st.warning(f"⚠ OOS 僅 {oos_split['n_oos']} 筆（<30），期望值僅供參考")
+            elif oos.get("顯著正Edge"):
+                st.success(f"✅ OOS 期望值R CI = [{oos['期望值R_CI下界']}, {oos['期望值R_CI上界']}]，樣本外仍顯著為正")
+            else:
+                st.warning(f"⚠ OOS 期望值R CI = [{oos['期望值R_CI下界']}, {oos['期望值R_CI上界']}]，樣本外未達顯著")
+            with st.expander("樣本內 IS / 全體 對照"):
+                ist, ov = oos_split["is"], oos_split["overall"]
+                st.dataframe(pd.DataFrame([
+                    {"分組": "樣本內 IS", "交易數": ist["總交易數"], "勝率%": ist["勝率%"], "期望值R": ist["期望值R"]},
+                    {"分組": "樣本外 OOS", "交易數": oos["總交易數"], "勝率%": oos["勝率%"], "期望值R": oos["期望值R"]},
+                    {"分組": "全體", "交易數": ov["總交易數"], "勝率%": ov["勝率%"], "期望值R": ov["期望值R"]},
+                ]), use_container_width=True, hide_index=True)
+                st.caption("IS 因事後挑門檻而樂觀；IS 遠優於 OOS = 過擬合警訊。")
+
+        # 各大盤 Regime 拆解
+        by_regime = bt.get("by_regime")
+        if by_regime is not None and len(by_regime):
+            st.markdown("### 各大盤 Regime 拆解")
+            st.caption("策略在空頭組的 edge 若大幅衰減 → 代表高度依賴大盤多頭，需靠大盤過濾保護。")
+            st.dataframe(
+                by_regime[["大盤狀態", "總交易數", "勝率%", "平均R", "期望值R", "最大回撤R"]],
+                use_container_width=True, hide_index=True,
+            )
+            fig_r = go.Figure(go.Bar(
+                x=by_regime["大盤狀態"], y=by_regime["期望值R"],
+                marker_color=["#059669" if v > 0.2 else ("#D97706" if v > 0 else "#DC2626")
+                               for v in by_regime["期望值R"]],
+                text=[f"{v:.2f}" for v in by_regime["期望值R"]],
+                textposition="outside", marker_line_width=0,
+            ))
+            fig_r.update_layout(
+                height=240, margin=dict(l=8, r=8, t=8, b=8),
+                plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                showlegend=False, yaxis_title="期望值 R",
+                font=dict(family="Inter, sans-serif", size=11),
+            )
+            fig_r.update_xaxes(showgrid=False)
+            fig_r.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+            st.plotly_chart(fig_r, use_container_width=True,
+                             config={"displayModeBar": False})
 
         if len(bt["trades"]):
             st.markdown("### 累積 R 與 Drawdown")
@@ -1967,6 +2117,179 @@ with tab3:
                 fig_s.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
                 st.plotly_chart(fig_s, use_container_width=True,
                                  config={"displayModeBar": False})
+
+            # ===== 參數高原圖 =====
+            st.divider()
+            st.markdown("### 參數高原圖")
+            st.caption("掃一維參數看期望值曲線：**高原（一段都不錯）= 穩健**；**尖峰（只有一點好）= 過擬合**。建議取高原中點，別挑尖峰。")
+            pl_param = st.radio(
+                "掃描參數", ["min_score", "atr_mult", "tp_mult"],
+                format_func=lambda x: {"min_score": "最低評分", "atr_mult": "ATR停損倍數", "tp_mult": "停利倍數"}[x],
+                horizontal=True, key="plateau_param",
+            )
+            if st.button("跑高原圖", key="plateau_btn"):
+                cfg = build_cfg()
+                resolved = bt.get("resolved")
+                if not resolved:
+                    st.error("缺少回測資料 — 請重跑回測")
+                else:
+                    pcfg = base_cfg.get("sensitivity", {}).get("plateau", {})
+                    grid = {
+                        "min_score": pcfg.get("min_score_grid", [4, 5, 6, 7, 8]),
+                        "atr_mult": pcfg.get("atr_mult_grid", [1.0, 1.5, 2.0, 2.5, 3.0]),
+                        "tp_mult": pcfg.get("tp_mult_grid", [1.5, 2.0, 2.5, 3.0]),
+                    }[pl_param]
+                    bar4 = st.progress(0.0, text="高原掃描中 …")
+                    def pl_cb(i, n, v):
+                        bar4.progress(min(i / n, 1.0), text=f"{pl_param}={v}")
+                    try:
+                        st.session_state["plateau"] = run_plateau(
+                            resolved, cfg, pl_param, grid,
+                            int(bt_lookback), int(bt_hold), progress_cb=pl_cb,
+                        )
+                    except Exception as e:
+                        st.error(f"高原圖失敗：{e}")
+
+            if "plateau" in st.session_state:
+                pl = st.session_state["plateau"]
+                ptab = pl["table"]; pinfo = pl["plateau"]
+                fig_p = go.Figure()
+                fig_p.add_trace(go.Scatter(
+                    x=ptab["param_value"], y=ptab["期望值R"], mode="lines+markers",
+                    name="期望值R", line=dict(color="#2563EB"),
+                ))
+                fig_p.add_trace(go.Scatter(
+                    x=ptab["param_value"], y=pinfo["neighbor_min"], mode="lines",
+                    name="鄰域最小", line=dict(color="#94A3B8", dash="dot"),
+                ))
+                if pinfo["plateau"]:
+                    lo, hi, center = pinfo["plateau"]
+                    fig_p.add_vrect(x0=lo, x1=hi, fillcolor="#059669", opacity=0.12, line_width=0)
+                for pk in pinfo["peaks"]:
+                    fig_p.add_trace(go.Scatter(
+                        x=[ptab["param_value"].iloc[pk]], y=[ptab["期望值R"].iloc[pk]],
+                        mode="markers", marker=dict(color="#DC2626", size=12, symbol="x"),
+                        name="尖峰(過擬合)", showlegend=False,
+                    ))
+                fig_p.update_layout(
+                    height=300, margin=dict(l=8, r=8, t=8, b=8),
+                    plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                    xaxis_title=pl["param_name"], yaxis_title="期望值 R",
+                    font=dict(family="Inter, sans-serif", size=11),
+                )
+                fig_p.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+                st.plotly_chart(fig_p, use_container_width=True, config={"displayModeBar": False})
+                if pinfo["recommended"] is not None:
+                    st.success(f"✅ 建議穩健參數（高原中點）：**{pinfo['recommended']}**（綠色區段）")
+                else:
+                    st.warning("⚠ 找不到明顯高原 — 曲線可能過於起伏（樣本不足或策略不穩），勿挑單一尖峰")
+                st.dataframe(ptab, use_container_width=True, hide_index=True)
+
+            # ===== 因子增量貢獻驗證 =====
+            st.divider()
+            st.markdown("### 因子驗證（增量貢獻）")
+            st.caption("逐棒比較「因子成立 vs 不成立」的未來平均 R；lift(R) > 0 才代表該因子真的提升期望值。減法用：lift ≈ 0 或負的因子可考慮砍掉或降權。")
+            if st.button("跑因子驗證", key="factor_btn"):
+                cfg = build_cfg()
+                resolved = bt.get("resolved")
+                if not resolved:
+                    st.error("缺少回測資料 — 請重跑回測")
+                else:
+                    bar3 = st.progress(0.0, text="因子驗證中 …")
+                    def fe_cb(stage, pct, msg):
+                        bar3.progress(min(pct, 1.0), text=f"{stage}：{msg}")
+                    try:
+                        fe = run_factor_eval(
+                            None, cfg, lookback_days=int(bt_lookback),
+                            hold_days=int(bt_hold), resolved=resolved,
+                            progress_cb=fe_cb,
+                        )
+                        st.session_state["factor_eval"] = fe
+                    except Exception as e:
+                        st.error(f"因子驗證失敗：{e}")
+
+            if "factor_eval" in st.session_state:
+                fe = st.session_state["factor_eval"]
+                base = fe.get("base", {})
+                if base:
+                    fc = st.columns(3)
+                    fc[0].metric("樣本數", fmt_int(base.get("樣本數", 0)))
+                    fc[1].metric("整體平均 R", base.get("整體平均R", "—"))
+                    fc[2].metric("整體勝率 %", f"{base.get('整體勝率%', '—')}%")
+                tbl = fe.get("table")
+                if tbl is not None and len(tbl):
+                    st.dataframe(
+                        tbl, use_container_width=True, hide_index=True,
+                        column_config={
+                            "lift(R)": st.column_config.NumberColumn(
+                                "lift(R)", format="%.3f",
+                                help="成立平均R − 不成立平均R；正值=該因子提升期望值"),
+                        },
+                    )
+                    fig_f = go.Figure(go.Bar(
+                        x=tbl["因子"], y=tbl["lift(R)"],
+                        marker_color=["#059669" if v > 0.02 else ("#D97706" if v > 0 else "#DC2626")
+                                       for v in tbl["lift(R)"]],
+                        text=[f"{v:.3f}" for v in tbl["lift(R)"]],
+                        textposition="outside", marker_line_width=0,
+                    ))
+                    fig_f.update_layout(
+                        height=260, margin=dict(l=8, r=8, t=8, b=8),
+                        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                        showlegend=False, yaxis_title="lift(R)",
+                        font=dict(family="Inter, sans-serif", size=11),
+                    )
+                    fig_f.update_xaxes(showgrid=False)
+                    fig_f.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+                    st.plotly_chart(fig_f, use_container_width=True,
+                                     config={"displayModeBar": False})
+                st.caption(fe.get("note", ""))
+
+                # 套用 lift 建議權重（減法用）
+                from src.runner import run_weight_suggest
+                cfg = build_cfg()
+                try:
+                    sug = run_weight_suggest(cfg, fe_result=fe)
+                except Exception:
+                    sug = None
+                if sug and sug.get("detail"):
+                    st.markdown("#### 依 lift 建議權重")
+                    st.dataframe(pd.DataFrame(sug["detail"]),
+                                 use_container_width=True, hide_index=True)
+                    st.caption(sug.get("note", ""))
+                    if st.button("套用建議權重到側欄", key="apply_lift_weights"):
+                        _map = {
+                            "breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
+                            "turnover_strong": "w_turnover", "kd": "w_kd", "macd": "w_macd",
+                            "rel_strength": "w_rs", "trend_confirm": "w_trend",
+                        }
+                        for sc_key, ss_key in _map.items():
+                            if sc_key in sug["weights"]:
+                                st.session_state[ss_key] = int(sug["weights"][sc_key])
+                        st.toast("已套用建議權重，請看側欄「評分權重」", icon="✅")
+                        st.rerun()
+
+                # 因子相關性矩陣
+                corr = fe.get("corr")
+                if corr is not None and len(corr):
+                    st.markdown("#### 因子相關性矩陣")
+                    st.caption("phi 接近 ±1 = 兩因子高度重複（資訊冗餘）。重複群只需保留一個。")
+                    fig_h = go.Figure(go.Heatmap(
+                        z=corr.values, x=list(corr.columns), y=list(corr.index),
+                        colorscale="RdBu", zmid=0, zmin=-1, zmax=1,
+                        text=[[f"{v:.2f}" for v in row] for row in corr.values],
+                        texttemplate="%{text}", showscale=True,
+                    ))
+                    fig_h.update_layout(height=340, margin=dict(l=8, r=8, t=8, b=8),
+                                        font=dict(family="Inter, sans-serif", size=10))
+                    st.plotly_chart(fig_h, use_container_width=True,
+                                     config={"displayModeBar": False})
+                    if fe.get("groups"):
+                        for g in fe["groups"]:
+                            st.info(f"重複群 {g['成員']} → 建議保留 **{g['建議保留']}**，"
+                                    f"合併/降權：{', '.join(g['建議合併'])}")
+                    else:
+                        st.caption("未發現高度重複因子群（門檻內）。")
         else:
             st.warning("回測無任何交易產生 — 試試降低「最低評分」門檻")
 

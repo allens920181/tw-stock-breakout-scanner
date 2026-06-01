@@ -30,16 +30,15 @@ def _save_cache(data):
 
 
 def lookup_via_yf(code):
-    """以 yfinance 嘗試查詢名稱（.TW → .TWO）"""
-    for suffix in (".TW", ".TWO"):
-        sym = f"{code}{suffix}"
-        try:
-            info = yf.Ticker(sym).info
-            name = info.get("shortName") or info.get("longName")
-            if name:
-                return str(name).strip()
-        except Exception:
-            continue
+    """以 yfinance 嘗試查詢名稱（僅上市 .TW）"""
+    sym = f"{code}.TW"
+    try:
+        info = yf.Ticker(sym).info
+        name = info.get("shortName") or info.get("longName")
+        if name:
+            return str(name).strip()
+    except Exception:
+        pass
     return None
 
 
