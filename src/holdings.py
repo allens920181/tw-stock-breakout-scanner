@@ -51,9 +51,11 @@ def load_holdings(file_path, etf_fix_map):
 
 
 def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
-                    time_stop_days=10, profit_taking_at_1r=True):
+                    time_stop_days=10, profit_taking_at_1r=True,
+                    atr_trail_mult=3.0):
     """
     產生持股賣出建議。
+    atr_trail_mult: Chandelier 移動停利 = 進場後最高價 - ATR14 × 此倍數
     """
     if df is None or df.empty or len(df) < 60:
         return _row(symbol, name, market, entry_price, entry_date, shares,
@@ -70,15 +72,24 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     ma20 = float(latest["MA20"])
     k = float(latest["K"])
     d = float(latest["D"])
+    atr = float(latest["ATR14"]) if "ATR14" in df.columns and pd.notna(latest.get("ATR14")) else None
 
     # ===== 計算與進場日相關的指標 =====
     held_days = None
+    highest_since_entry = float(df["High"].max())
     if entry_date is not None:
         try:
             df_after = df[df.index.date >= entry_date]
             held_days = len(df_after)
+            if len(df_after):
+                highest_since_entry = float(df_after["High"].max())
         except Exception:
             held_days = None
+
+    # ===== Chandelier ATR 移動停利（與進場 ATR 框架一致）=====
+    chandelier = None
+    if atr is not None and atr > 0:
+        chandelier = highest_since_entry - atr * atr_trail_mult
 
     profit = close - entry_price
     profit_pct = profit / entry_price * 100 if entry_price > 0 else 0
@@ -89,7 +100,8 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     r_multiple = profit / risk if risk > 0 else None
 
     # ===== 出場規則 =====
-    # 規則優先順序：停損 > 技術轉弱 > 目標達成 > 時間停損 > 移動停利 > 保留
+    # 優先順序：停損 > 技術轉弱 > +2R > +1R > 移動停利(ATR) > 時間停損 > 移動停利(MA10) > 保留
+    # 移動停利排在時間停損之前：獲利部位跌破波段高就鎖利，不應被時間停損誤判
     actions = []
 
     # 1. 停損：跌破 MA20 且跌破近期 swing low
@@ -109,16 +121,22 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     elif r_multiple is not None and r_multiple >= 1 and profit_taking_at_1r:
         actions.append(("🟢 達 +1R 半倉鎖利", "賣半", f"+{r_multiple:.1f}R 報酬 {profit_pct:.1f}%"))
 
-    # 5. 時間停損：持有 N 日仍 < 1R
+    # 5. 移動停利（ATR Chandelier）：獲利中跌破「波段高 - ATR×倍數」
+    elif chandelier is not None and profit_pct > 0 and close < chandelier:
+        actions.append(("🟡 移動停利(ATR)", "全出",
+                        f"跌破 Chandelier={chandelier:.2f}"
+                        f"（波段高 {highest_since_entry:.2f} - {atr_trail_mult:.0f}×ATR）鎖利 {profit_pct:.1f}%"))
+
+    # 6. 時間停損：持有 N 日仍 < 1R
     elif held_days is not None and held_days >= time_stop_days and (r_multiple is None or r_multiple < 1):
         actions.append(("⌛ 時間停損", "全出",
                         f"持有 {held_days} 日仍未達 +1R（{profit_pct:.1f}%）"))
 
-    # 6. 移動停利：曾達 +1R 後跌破 MA10
+    # 7. 移動停利（MA10）：較緊的備援，曾獲利後跌破 MA10
     elif close < ma10 and profit_pct > 5:
         actions.append(("🟡 移動停利", "全出", f"跌破 MA10={ma10:.2f} 鎖利 {profit_pct:.1f}%"))
 
-    # 7. 保留
+    # 8. 保留
     else:
         actions.append(("✅ 續抱", "保留", f"未觸發出場條件 報酬 {profit_pct:.1f}%"))
 
@@ -142,6 +160,7 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
         "目標1(+1R半倉)": target_1r,
         "目標2(+2R出清)": target_2r,
         "移動停利MA10": trail_stop,
+        "移動停利(ATR)": round(chandelier, 2) if chandelier is not None else None,
         "時間停損日": time_stop_str,
         "技術轉弱觸發": f"K<D 且 收盤<MA20({ma20:.2f})",
     }

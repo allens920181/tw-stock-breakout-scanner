@@ -62,6 +62,65 @@ def test_filter_low_liquidity():
     assert res["狀態"] == "流動性不足"
 
 
+def test_chip_sell_downgrades_entry():
+    """法人賣超應把進場降為觀察（避免買在出貨）"""
+    df = _strong_uptrend_df()
+    cfg = {**CFG, "chips": {"sell_downgrade": True}}
+    base = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000,
+                         cfg=cfg, chips={"inst_net_lots": -5000, "foreign_net_lots": -4000})
+    assert base["籌碼確認"] == "法人賣超"
+    assert base["法人買賣超(張)"] == -5000
+    # 進場訊號遇法人賣超 → 不應仍是進場
+    assert base["訊號判斷"] != "進場"
+
+
+def test_chip_buy_confirms():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000,
+                        cfg=CFG, chips={"inst_net_lots": 8000, "foreign_net_lots": 6000})
+    assert res["籌碼確認"] == "法人買超"
+
+
+def test_chip_buy_streak_label():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000,
+                        cfg=CFG, chips={"inst_net_lots": 8000, "foreign_net_lots": 6000,
+                                        "inst_buy_streak": 3, "inst_net_5d_lots": 20000})
+    assert res["籌碼確認"] == "法人連買3日"
+    assert res["法人連買天數"] == 3
+    assert res["法人5日累計(張)"] == 20000
+
+
+def test_margin_surge_flag():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=CFG,
+                        margin={"margin_chg_pct": 35.0, "short_margin_ratio": 1.0})
+    assert res["融資券提示"] == "融資爆增"
+    assert res["融資增減%"] == 35.0
+
+
+def test_margin_high_short_ratio():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=CFG,
+                        margin={"margin_chg_pct": 1.0, "short_margin_ratio": 25.0})
+    assert res["融資券提示"] == "高券資比"
+
+
+def test_margin_surge_downgrade_optional():
+    df = _strong_uptrend_df()
+    cfg = {**CFG, "margin": {"surge_downgrade": True, "surge_pct": 10.0}}
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=cfg,
+                        margin={"margin_chg_pct": 30.0, "short_margin_ratio": 1.0})
+    assert res["訊號判斷"] != "進場"
+
+
+def test_no_chips_ok():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=CFG)
+    assert res["籌碼確認"] == "—"
+    assert res["法人買賣超(張)"] is None
+
+
 def test_insufficient_data():
     df = pd.DataFrame({
         "Open": [1, 2], "High": [1, 2], "Low": [1, 2],

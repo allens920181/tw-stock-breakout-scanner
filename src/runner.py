@@ -6,17 +6,25 @@ import pandas as pd
 
 from . import cache as cache_mod
 from .fetcher import (
+    fetch_all_current_prices,
     fetch_all_shares,
     load_stock_list,
     resolve_markets_and_data,
 )
-from .backtest import backtest_symbol, summarize_trades
+from .backtest import (
+    backtest_symbol, summarize_by_regime, summarize_trades, summarize_trades_is_oos,
+)
+from .chips import fetch_chips
+from .earnings import fetch_all_earnings
+from .factor_eval import evaluate_factors, suggest_weights_from_lift
+from .margin import fetch_margin
+from .sectors import annotate_group_strength, apply_sector_heat, fetch_sectors
 from .holdings import analyze_holding, load_holdings
 from .macro import classify_us_market, merge_position_factor
 from .market import classify_market
 from .report import build_dataframes
 from .scoring import analyze_stock
-from .sensitivity import sensitivity_scan
+from .sensitivity import detect_plateau, plateau_scan, sensitivity_scan
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +65,52 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     shares_map = fetch_all_shares(
         symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
     )
-    emit("抓股數", 0.78, "完成")
+    emit("抓股數", 0.76, "完成")
+
+    emit("抓現價", 0.77, f"平行抓 {len(resolved)} 檔現價")
+    price_map = fetch_all_current_prices(
+        symbols, cfg["data"]["max_workers"],
+    )
+    emit("抓現價", 0.78, "完成")
+
+    chips_map = {}
+    chip_cfg = cfg.get("chips", {})
+    if chip_cfg.get("enabled", True):
+        emit("抓籌碼", 0.785, "抓三大法人 / 外資買賣超")
+        try:
+            chips_map = fetch_chips(
+                cfg["data"]["cache_dir"],
+                days=chip_cfg.get("streak_days", 5),
+                verify=chip_cfg.get("verify_ssl", True),
+            )
+            emit("抓籌碼", 0.79, f"籌碼 {len(chips_map)} 檔")
+        except Exception as e:
+            log.warning("籌碼抓取失敗，略過：%s", e)
+
+    margin_map = {}
+    mgn_cfg = cfg.get("margin", {})
+    if mgn_cfg.get("enabled", True):
+        emit("抓融資券", 0.792, "抓融資餘額 / 券資比")
+        try:
+            margin_map = fetch_margin(
+                cfg["data"]["cache_dir"],
+                verify=mgn_cfg.get("verify_ssl", True),
+            )
+            emit("抓融資券", 0.795, f"融資券 {len(margin_map)} 檔")
+        except Exception as e:
+            log.warning("融資券抓取失敗，略過：%s", e)
+
+    earnings_map = {}
+    earn_cfg = cfg.get("earnings", {})
+    if earn_cfg.get("enabled", True):
+        emit("抓財報日", 0.797, f"抓 {len(resolved)} 檔下一財報日")
+        try:
+            earnings_map = fetch_all_earnings(
+                symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
+            )
+            emit("抓財報日", 0.80, "完成")
+        except Exception as e:
+            log.warning("財報日抓取失敗，略過：%s", e)
 
     market_state = None
     us_state = None
@@ -91,6 +144,10 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
                 r["symbol"], r["company_name"], r["market"],
                 r["df"], shares_map.get(r["symbol"]), cfg,
                 market_state=market_state,
+                current_price=price_map.get(r["symbol"]),
+                chips=chips_map.get(r["symbol"].split(".")[0]),
+                margin=margin_map.get(r["symbol"].split(".")[0]),
+                earnings_date=earnings_map.get(r["symbol"]),
             )
             results.append(res)
         except Exception as e:
@@ -106,8 +163,25 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     for code, name in not_found:
         failed_list.append({
             "股票": code, "公司名稱": name, "市場": None,
-            "錯誤訊息": "無法判斷上市/上櫃",
+            "錯誤訊息": "非上市或查無資料",
         })
+
+    # 族群同步：跨檔後處理（同產業強勢檔數）
+    if cfg.get("sectors", {}).get("enabled", True):
+        emit("族群同步", 0.985, "計算同產業強勢檔數")
+        try:
+            sectors_map = fetch_sectors(
+                cfg["data"]["cache_dir"],
+                verify=cfg.get("sectors", {}).get("verify_ssl", True),
+            )
+            annotate_group_strength(results, sectors_map)
+            if cfg.get("sectors", {}).get("heat_enabled", True):
+                apply_sector_heat(
+                    results,
+                    heat_max=cfg.get("sectors", {}).get("heat_max", 3),
+                )
+        except Exception as e:
+            log.warning("族群同步計算失敗，略過：%s", e)
 
     elapsed = time.time() - t0
     df, summary, failed_df = build_dataframes(
@@ -194,7 +268,8 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
 
 
 def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
-                 min_score=None, items=None, progress_cb=None):
+                 min_score=None, items=None, progress_cb=None,
+                 oos_ratio=None, oos_mode=None):
     """對指定清單做 walk-forward 回測"""
     def emit(stage, pct, msg):
         log.info("[%s] %s", stage, msg)
@@ -219,8 +294,17 @@ def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
     emit("下載資料", 0.50, f"定位 {len(resolved)} 檔")
 
     weights = cfg["scoring"]["weights"]
+    costs = cfg.get("costs")
     if min_score is None:
         min_score = cfg["scoring"]["thresholds"]["strong"]
+
+    regime_map = None
+    if cfg.get("backtest", {}).get("regime_split", {}).get("enabled", True):
+        from .market import build_regime_map
+        try:
+            regime_map = build_regime_map(cfg["data"]["period"], cfg["data"]["cache_dir"])
+        except Exception as e:
+            log.warning("regime_map 建立失敗：%s", e)
 
     emit("回測", 0.55, f"逐檔回測 (min_score={min_score}, hold={hold_days}, lookback={lookback_days})")
 
@@ -231,7 +315,8 @@ def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
         try:
             trades = backtest_symbol(
                 r["df"], weights, min_score,
-                hold_days=hold_days, lookback=lookback_days,
+                hold_days=hold_days, lookback=lookback_days, costs=costs,
+                regime_map=regime_map,
             )
             for t in trades:
                 t["股票"] = r["symbol"]
@@ -257,18 +342,91 @@ def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
     if len(trades_df):
         trades_df = trades_df[[c for c in cols_order if c in trades_df.columns]]
 
-    summary = summarize_trades(all_trades)
+    summary = summarize_trades(all_trades, cfg)
+
+    # 樣本外驗證（IS/OOS）
+    bt_cfg = cfg.get("backtest", {})
+    if oos_ratio is None:
+        oos_ratio = bt_cfg.get("oos_ratio", 0.3) if bt_cfg.get("oos_enabled", True) else 0
+    if oos_mode is None:
+        oos_mode = bt_cfg.get("oos_mode", "ratio")
+    oos_split = summarize_trades_is_oos(
+        all_trades, cfg, oos_ratio=oos_ratio, mode=oos_mode,
+        n_folds=bt_cfg.get("oos_n_folds", 3),
+    )
+
     by_symbol_df = pd.DataFrame(by_symbol).sort_values(
         by="期望值R", ascending=False,
     ) if by_symbol else pd.DataFrame()
 
     emit("完成", 1.0, f"回測完成：{summary['總交易數']} 筆交易，勝率 {summary['勝率%']}%")
     return {
+        "oos_split": oos_split,
+        "by_regime": summarize_by_regime(all_trades, cfg),
         "trades": trades_df,
         "summary": summary,
         "by_symbol": by_symbol_df,
         "resolved": resolved,
     }
+
+
+def run_factor_eval(input_path, cfg, lookback_days=250, hold_days=10,
+                    items=None, resolved=None, progress_cb=None):
+    """因子增量貢獻驗證。可直接帶 resolved（從回測結果重用）以省下載。"""
+    def emit(stage, pct, msg):
+        log.info("[%s] %s", stage, msg)
+        if progress_cb:
+            try:
+                progress_cb(stage, pct, msg)
+            except Exception:
+                pass
+
+    cache_mod.ensure_dir(cfg["data"]["cache_dir"])
+    if resolved is None:
+        if items is None:
+            items = load_stock_list(input_path, cfg["etf_fix_map"])
+        emit("下載資料", 0.1, f"讀入 {len(items)} 檔")
+        resolved, _ = resolve_markets_and_data(
+            items, cfg["data"]["period"], cfg["data"]["cache_dir"],
+            chunk_size=cfg["data"].get("chunk_size", 50),
+            chunk_sleep=cfg["data"].get("chunk_sleep", 1.0),
+        )
+    emit("因子驗證", 0.5, f"逐棒評估 {len(resolved)} 檔")
+    result = evaluate_factors(resolved, cfg, lookback=lookback_days, hold_days=hold_days)
+    emit("完成", 1.0, "因子驗證完成")
+    return result
+
+
+def run_weight_suggest(cfg, fe_result=None, resolved=None,
+                       lookback_days=250, hold_days=10):
+    """依因子驗證的 lift(R) 建議權重。優先用既有 fe_result。"""
+    if fe_result is None:
+        if resolved is None:
+            raise ValueError("需提供 fe_result 或 resolved")
+        fe_result = evaluate_factors(resolved, cfg, lookback=lookback_days, hold_days=hold_days)
+    lw = cfg.get("scoring", {}).get("lift_weights", {})
+    return suggest_weights_from_lift(
+        fe_result, cfg,
+        total=lw.get("total", 8),
+        eps=lw.get("eps", 0.02),
+        preserve_unverifiable=lw.get("preserve_unverifiable", ["turnover_strong"]),
+    )
+
+
+def run_plateau(resolved, cfg, param_name, grid, lookback_days, hold_days,
+                progress_cb=None):
+    """參數高原圖：一維掃描 + 高原/尖峰偵測。"""
+    table = plateau_scan(resolved, cfg, param_name, grid, lookback_days, hold_days,
+                         progress_cb=progress_cb)
+    pcfg = cfg.get("sensitivity", {}).get("plateau", {})
+    plateau = detect_plateau(
+        table["param_value"].tolist(), table["期望值R"].tolist(),
+        plateau_ratio=pcfg.get("plateau_ratio", 0.7),
+        min_width=pcfg.get("min_width", 3),
+        neighbor_w=pcfg.get("neighbor_w", 1),
+        spike_drop=pcfg.get("spike_drop", 0.5),
+    )
+    return {"table": table, "plateau": plateau, "param_name": param_name}
 
 
 def run_sensitivity(resolved, cfg, score_range, lookback_days, hold_days,

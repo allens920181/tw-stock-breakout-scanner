@@ -96,6 +96,7 @@ def batch_download(symbols, period, chunk_size=50, sleep_between=1.0, progress_c
 
 def resolve_markets_and_data(items, period, cache_dir, chunk_size=50, chunk_sleep=1.0):
     """
+    僅處理上市（.TW）；上櫃不納入。
     回傳 (resolved, not_found)
       resolved: list[{symbol, company_name, market, df}]
       not_found: list[(code, name)]
@@ -105,25 +106,21 @@ def resolve_markets_and_data(items, period, cache_dir, chunk_size=50, chunk_slee
 
     for it in items:
         code = it["code"]
-        hit = False
-        for suffix, market in [(".TW", "TW"), (".TWO", "TWO")]:
-            sym = code + suffix
-            cached = cache.load_df(cache_dir, sym, "ohlc")
-            if cached is not None and not cached.empty:
-                resolved.append({
-                    "symbol": sym, "company_name": it["company_name"],
-                    "market": market, "df": cached,
-                })
-                hit = True
-                break
-        if not hit:
-            pending_tw.append((code + ".TW", it["company_name"], code))
+        sym = code + ".TW"
+        cached = cache.load_df(cache_dir, sym, "ohlc")
+        if cached is not None and not cached.empty:
+            resolved.append({
+                "symbol": sym, "company_name": it["company_name"],
+                "market": "TW", "df": cached,
+            })
+        else:
+            pending_tw.append((sym, it["company_name"], code))
 
     log.info("批次下載 .TW %d 檔", len(pending_tw))
     tw_symbols = [x[0] for x in pending_tw]
     tw_data = batch_download(tw_symbols, period, chunk_size, chunk_sleep)
 
-    pending_two_map = {}
+    not_found = []
     for sym, name, code in pending_tw:
         df = tw_data.get(sym)
         if df is not None and not df.empty:
@@ -133,27 +130,10 @@ def resolve_markets_and_data(items, period, cache_dir, chunk_size=50, chunk_slee
                 "market": "TW", "df": df,
             })
         else:
-            pending_two_map[code] = name
-
-    log.info("批次下載 .TWO %d 檔", len(pending_two_map))
-    two_symbols = [c + ".TWO" for c in pending_two_map]
-    two_data = batch_download(two_symbols, period)
-
-    not_found = []
-    for code, name in pending_two_map.items():
-        sym = code + ".TWO"
-        df = two_data.get(sym)
-        if df is not None and not df.empty:
-            cache.save_df(cache_dir, sym, "ohlc", df)
-            resolved.append({
-                "symbol": sym, "company_name": name,
-                "market": "TWO", "df": df,
-            })
-        else:
             not_found.append((code, name))
 
     for code, name in not_found:
-        log.warning("無法判斷上市/上櫃：%s %s", code, name)
+        log.warning("上市查無資料（非上市或代碼錯誤）：%s %s", code, name)
 
     return resolved, not_found
 
@@ -208,6 +188,46 @@ def _fetch_shares_one(symbol, cache_dir, retries=2):
 
     cache.save_obj(cache_dir, key, val)
     return symbol, val
+
+
+def _fetch_current_price_one(symbol):
+    try:
+        t = yf.Ticker(symbol)
+        try:
+            fi = t.fast_info
+            v = None
+            if hasattr(fi, "last_price"):
+                v = fi.last_price
+            elif hasattr(fi, "get"):
+                v = fi.get("last_price") or fi.get("lastPrice")
+            if v:
+                return symbol, float(v)
+        except Exception:
+            pass
+        try:
+            hist = t.history(period="1d", interval="1m")
+            if hist is not None and not hist.empty:
+                return symbol, float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return symbol, None
+
+
+def fetch_all_current_prices(symbols, max_workers):
+    """並行抓即時/最新成交價（不快取，每次掃描都重抓）"""
+    out = {}
+    log.info("平行抓現價 %d 檔 (%d 緒)", len(symbols), max_workers)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_fetch_current_price_one, s) for s in symbols]
+        for fu in as_completed(futures):
+            try:
+                sym, val = fu.result()
+                out[sym] = val
+            except Exception as e:
+                log.warning("抓現價失敗：%s", e)
+    return out
 
 
 def fetch_all_shares(symbols, cache_dir, max_workers):

@@ -15,17 +15,26 @@ filters:
   min_avg_volume: 500000     # 20 日均量下限（股；500 張 = 500,000 股）
   require_above_ma60: true   # 必須站上 MA60（過濾下降趨勢）
   min_risk_pct: 0.02         # 停損距離 / 進場價 須 ≥ 2%（避免 RR 虛胖）
+  atr_mult: 1.5              # 停損 = 進場價 - ATR14 × 此倍數（風險距離一致）
+  vol_multiple: 1.5          # 突破量能門檻（對 50 日均量）
+  ext_threshold: 1.10        # 進場價 / MA20 ≥ 此值 → 過度延伸（追高）降為觀察
 
-# 加權評分（總分 8）
+# 加權評分（總分 10）
 scoring:
   weights:
-    breakout_with_volume: 2  # 突破 20 日高 + 量增 1.2 倍（合併必須同時成立）
+    breakout_with_volume: 2  # 突破 20 日高 + 量增 1.5 倍（對 50 日均量）
     ma_bullish: 2            # MA5>MA20>MA60 且 Close>MA20
     turnover_strong: 2       # 換手率 > 1% 且 > 20 日平均換手率
     kd: 1                    # K > D 且 K > 70
     macd: 1                  # OSC > 0
+    rel_strength: 1          # 個股 60 日報酬 > 大盤（^TWII）
+    trend_confirm: 1         # ADX > 20 或 MA60 斜率向上
+  lift_weights:
+    total: 8                 # lift 建議權重的總分配額
+    eps: 0.02                # |lift| 小於此視為雜訊歸零
+    preserve_unverifiable: ["turnover_strong"]  # 無歷史 lift 沿用原權重
   thresholds:
-    enter: 6    # ≥ 6 進場
+    enter: 7    # ≥ 7 進場
     watch: 5    # ≥ 5 觀察
     # 其他 = 不操作
 
@@ -34,19 +43,19 @@ presets:
   conservative:
     label: "保守"
     filters: {min_price: 30, min_avg_volume: 1500000, require_above_ma60: true, min_risk_pct: 0.03}
-    thresholds: {enter: 7, watch: 6}
+    thresholds: {enter: 8, watch: 6}
     risk_per_trade_pct: 0.005
     max_position_pct: 0.10
   balanced:
     label: "平衡"
     filters: {min_price: 10, min_avg_volume: 500000, require_above_ma60: true, min_risk_pct: 0.02}
-    thresholds: {enter: 6, watch: 5}
+    thresholds: {enter: 7, watch: 5}
     risk_per_trade_pct: 0.01
     max_position_pct: 0.20
   aggressive:
     label: "積極"
     filters: {min_price: 5, min_avg_volume: 200000, require_above_ma60: false, min_risk_pct: 0.01}
-    thresholds: {enter: 5, watch: 4}
+    thresholds: {enter: 6, watch: 4}
     risk_per_trade_pct: 0.02
     max_position_pct: 0.30
 
@@ -69,6 +78,76 @@ position_sizing:
 market_filter:
   enabled: true
   symbol: "^TWII"
+
+# 籌碼面（三大法人 / 外資買賣超，官方免費 API、免 key）
+chips:
+  enabled: true          # 關閉則不抓籌碼、不影響其他評分
+  verify_ssl: true       # 憑證驗證；少數企業網路/代理需設 false
+  sell_downgrade: true   # 進場訊號但法人賣超 → 降為觀察（避免買在出貨）
+  streak_days: 5         # 連買天數 / 累計用的回看交易日數（每市場每日各 1 次請求）
+
+# 融資券（散戶槓桿反指標 / 券資比軋空）
+margin:
+  enabled: true
+  verify_ssl: true
+  surge_pct: 10.0          # 融資單日增幅 ≥ 此% → 標記「融資爆增」（過熱警示）
+  surge_downgrade: false   # 是否把「融資爆增」的進場降為觀察（預設只警示不降級）
+  short_ratio_flag: 20.0   # 券資比 ≥ 此% → 標記「高券資比」（潛在軋空題材）
+
+# 族群同步（同產業是否一起強）
+sectors:
+  enabled: true
+  verify_ssl: true
+  heat_enabled: true   # 組合熱度控制：同產業進場過多時自動降碼
+  heat_max: 3          # 同產業進場檔數上限；超過則每檔按 上限/檔數 比例降碼
+  # 產業別來源：TWSE 上市公司基本資料
+
+# 財報避雷（財報前後波動風險高，避免進場）
+earnings:
+  enabled: true
+  pre_days: 3              # 財報前 N 日內進場 → 降為觀察
+  post_days: 1            # 財報後 N 日內進場 → 降為觀察
+  blackout_downgrade: true # 來源 yfinance best-effort；抓不到日期則不 blackout
+
+# 回測樣本外驗證（walk-forward IS/OOS）
+backtest:
+  oos_enabled: true
+  oos_ratio: 0.3           # 後 30% 進場日為樣本外 OOS
+  oos_mode: "ratio"        # ratio=單切 / rolling=滾動分折
+  oos_n_folds: 3
+  regime_split:
+    enabled: true          # 依進場日大盤狀態（多/中/空）拆解績效
+
+# 參數高原圖（找穩健參數區間，避開過擬合尖峰）
+sensitivity:
+  plateau:
+    atr_mult_grid: [1.0, 1.5, 2.0, 2.5, 3.0]
+    min_score_grid: [4, 5, 6, 7, 8]
+    tp_mult_grid: [1.5, 2.0, 2.5, 3.0]
+    plateau_ratio: 0.7      # 鄰域最小值 ≥ 全域最大×此值 視為高原
+    min_width: 3            # 高原最小寬度（格數）
+    neighbor_w: 1           # 鄰域半徑
+    spike_drop: 0.5         # 鄰域落差 ≥ 此比例 視為尖峰
+
+# 因子相關性（找重複因子）
+factor_eval:
+  corr_high_thresh: 0.7      # |phi| ≥ 此值 視為高度重複
+
+# 統計顯著性（bootstrap 信賴區間 + 樣本可信度）
+stats:
+  bootstrap_n: 1000        # 重抽次數
+  ci_level: 0.95           # 信心水準
+  seed: 42                 # 固定種子可重現
+  min_samples_warn: 100    # < 此筆數 → 噪音警示
+  min_samples_reliable: 300  # ≥ 此筆數 → 視為足夠
+
+# 交易成本（讓回測說真話：手續費 + 證交稅）
+costs:
+  enabled: true            # 回測/敏感度報酬扣除來回成本
+  fee_rate: 0.001425       # 單邊手續費率
+  fee_discount: 1.0        # 券商折數（如 6 折 = 0.6）
+  tax_rate: 0.003          # 賣出證交稅（現股 0.3%）
+  apply_to_factor_eval: false  # 因子驗證是否也扣成本（預設關，避免雙重口徑混淆）
 
 output:
   dir: "."
