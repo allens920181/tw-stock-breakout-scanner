@@ -806,44 +806,39 @@ def render_header(market_state, last_scan_at=None, us_state=None):
     date_str = pd.Timestamp.today().strftime('%Y / %m / %d  %A')
     chips = []
 
-    if market_state:
-        cls = _chip_cls(market_state["regime"])
-        label = market_state["label"]
+    def _clean(label):
         for sym in ["🟢", "🔴", "🟡", "⚪"]:
             label = label.replace(sym, "")
-        label = label.strip()
-        tw_detail = market_state.get("detail", "")
+        return label.strip()
+
+    def _chip(name, label, cls, detail):
         chips.append(
-            f"<div class='hdr-status {cls}' title='{tw_detail}'>"
-            f"<span class='dot'></span>"
-            f"<b>台股 {label}</b>"
-            f"</div>"
+            f"<div class='hdr-status {cls}' title='{detail}'>"
+            f"<span class='dot'></span><b>{name} {label}</b></div>"
         )
 
-    if us_state:
-        cls = _chip_cls(us_state["regime"])
-        label = us_state["label"]
-        us_detail = us_state.get("detail", "")
-        chips.append(
-            f"<div class='hdr-status {cls}' title='{us_detail}'>"
-            f"<span class='dot'></span>"
-            f"<b>美股 {label}</b>"
-            f"</div>"
-        )
+    # 三顆燈永遠顯示；無資料時顯示「待掃描」灰燈，避免看起來像壞掉
+    if market_state and market_state.get("regime") not in (None, "unknown"):
+        _chip("台股", _clean(market_state["label"]), _chip_cls(market_state["regime"]),
+              market_state.get("detail", ""))
+    else:
+        _chip("台股", "待掃描", "unknown", "按「開始掃描」後更新")
+
+    if us_state and us_state.get("regime") not in (None, "unknown"):
+        _chip("美股", _clean(us_state["label"]), _chip_cls(us_state["regime"]),
+              us_state.get("detail", ""))
+    else:
+        _chip("美股", "待掃描", "unknown", "按「開始掃描」後更新")
 
     big_state = market_state.get("big_state") if market_state else None
     if big_state:
         _bf = big_state.get("position_factor", 1.0)
         bcls = "bull" if _bf >= 1.0 else ("neutral" if _bf >= 0.75 else "bear")
-        blabel = big_state.get("label", "")
-        for sym in ["🟢", "🔴", "🟡", "⚪"]:
-            blabel = blabel.replace(sym, "")
-        chips.append(
-            f"<div class='hdr-status {bcls}' title='{big_state.get('detail','')}'>"
-            f"<span class='dot'></span>"
-            f"<b>大資金 {blabel.strip()}</b>"
-            f"</div>"
-        )
+        _chip("大資金", _clean(big_state.get("label", "")), bcls,
+              big_state.get("detail", ""))
+    else:
+        _chip("大資金", "待掃描", "unknown",
+              "外資台指期/台幣/大盤融資，掃描時計算")
 
     status_html = "<div class='hdr-chips'>" + "".join(chips) + "</div>" if chips else ""
     last = f"<span class='sep'>·</span>上次掃描 {last_scan_at}" if last_scan_at else ""
