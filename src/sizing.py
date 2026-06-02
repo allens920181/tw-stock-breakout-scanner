@@ -3,7 +3,8 @@ import math
 
 
 def calc_position(entry, stop, total_capital, risk_pct, position_factor=1.0,
-                  lot_size=1000, max_position_pct=0.20):
+                  lot_size=1000, max_position_pct=0.20,
+                  adv_shares=None, max_adv_pct=None):
     """
     回傳 dict:
       risk_per_share
@@ -46,6 +47,17 @@ def calc_position(entry, stop, total_capital, risk_pct, position_factor=1.0,
         cost = suggested_shares * entry
         cost_pct = cost / total_capital
         warning = f"已限縮至 {max_position_pct*100:.0f}% 單檔上限"
+
+    # 流動性上限：部位不超過 max_adv_pct × 20日均量（避免進得去出不來）
+    if adv_shares and adv_shares > 0 and max_adv_pct and suggested_shares > 0:
+        liq_cap_shares = math.floor(adv_shares * max_adv_pct / lot_size) * lot_size
+        if liq_cap_shares < suggested_shares:
+            suggested_shares = max(liq_cap_shares, 0)
+            suggested_lots = suggested_shares // lot_size
+            cost = suggested_shares * entry
+            cost_pct = cost / total_capital if total_capital > 0 else 0
+            liq_note = f"流動性限縮（≤{max_adv_pct*100:.0f}%日均量）"
+            warning = (warning + " | " if warning else "") + liq_note
 
     if suggested_lots == 0 and raw_shares > 0:
         warning = f"建議股數 {raw_shares:.0f} 不足 1 張，跳過或降低風險%"

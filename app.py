@@ -621,6 +621,15 @@ with st.sidebar:
             0.5, key="f_atr_mult",
             help="停損 = 進場價 − ATR14 × 此倍數。建議模式可自動校準到高原中心。",
         )
+        st.slider(
+            "流動性上限（部位 ≤ 此%×20日均量）", 0, 30,
+            int(st.session_state.get(
+                "max_adv_pct",
+                base_cfg.get("position_sizing", {}).get("max_adv_pct", 0.10) * 100)),
+            5, key="_max_adv_pct_pct",
+            help="避免小型股算出『進得去出不來』的部位。0=關閉。例如 10% = 部位不超過一日均量的 10%。",
+        )
+        st.session_state["max_adv_pct"] = st.session_state["_max_adv_pct_pct"] / 100
         st.checkbox(
             "潛伏模式：RS 硬門檻（排除弱於大盤）",
             value=bool(st.session_state.get("amb_rs_gate", _amba.get("require_positive_rs", True))),
@@ -724,6 +733,8 @@ def build_cfg():
         "risk_per_trade_pct": risk_pct,
         "lot_size": 1000,
         "max_position_pct": max_pos_pct,
+        "max_adv_pct": float(st.session_state.get(
+            "max_adv_pct", base_cfg.get("position_sizing", {}).get("max_adv_pct", 0.10))),
     }
     cfg.setdefault("strategy", {})
     cfg["strategy"]["mode"] = st.session_state.get("strategy_mode", "breakout")
@@ -2286,6 +2297,10 @@ with tab3:
         # Edge 燈號條（全寬）
         _costs_on = st.session_state.get("cost_enabled", True)
         st.caption("📊 報酬已扣來回交易成本" if _costs_on else "⚠ 未計交易成本（期望值偏樂觀）")
+        st.caption(
+            "⚠ **生存者偏差**：回測只跑「現在仍上市」的股票，已下市/被清洗的不在內，"
+            "故期望值**天生偏樂觀**。請用『📊 訊號實戰績效(live OOS)』與壓力測試交叉驗證，"
+            "並對回測數字打折理解。")
         render_edge_meter(s["期望值R"])
         st.markdown("")
 

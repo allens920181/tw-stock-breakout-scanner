@@ -93,6 +93,7 @@ position_sizing:
   risk_per_trade_pct: 0.01   # 單筆風險比例（1%）
   lot_size: 1000             # 1 張 = 1000 股
   max_position_pct: 0.20     # 單檔最大佔比 20%
+  max_adv_pct: 0.10          # 流動性上限：部位 ≤ 此比例×20日均量（避免進得去出不來；0=關閉）
 
 # 大盤過濾（不關掉、只調整部位）
 market_filter:

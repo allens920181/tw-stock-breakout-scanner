@@ -199,6 +199,8 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
         position_factor=position_factor,
         lot_size=ps.get("lot_size", 1000),
         max_position_pct=ps.get("max_position_pct", 0.20),
+        adv_shares=float(vol20) if vol20 and vol20 == vol20 else None,
+        max_adv_pct=ps.get("max_adv_pct", 0.10),
     )
 
     # 三級訊號：進場 / 觀察 / 不操作
