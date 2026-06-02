@@ -144,6 +144,16 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .hdr-status .sep { color: var(--border); margin: 0 4px; }
 .hdr-detail { color: var(--muted); }
 
+/* 今日三步引導列 */
+.today-steps {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  background: var(--surface, #F8FAFC); border: 1px solid var(--border, #E2E8F0);
+  border-radius: 8px; padding: 7px 12px; margin: 2px 0 12px 0; font-size: 12.5px;
+}
+.today-steps .step { color: var(--muted, #475569); }
+.today-steps .step b { color: var(--accent, #2563EB); margin-right: 3px; }
+.today-steps .arrow { color: var(--border, #CBD5E1); margin: 0 2px; }
+
 /* 候選卡片：完全使用 Streamlit 原生 container(border=True)，僅做最小化整體調整 */
 
 /* 候選資料 cell（取代 st.metric 以塞入副資訊） */
@@ -356,6 +366,23 @@ if "_prefs_loaded" not in st.session_state:
         st.session_state["last_calibrated_date"] = prefs["last_calibrated_date"]
 else:
     prefs = st.session_state["_prefs"]
+
+
+def _apply_and_rescan(toast_msg="已套用設定"):
+    """套用側欄設定後，若有現成掃描資料則『免重抓』立即重掃，免使用者跨分頁手動操作。"""
+    if st.session_state.get("scan_cache"):
+        try:
+            cfg2 = build_cfg()
+            new_result = run_scan(cfg=cfg2, cached=st.session_state["scan_cache"])
+            new_result["scan_cache"] = st.session_state["scan_cache"]
+            st.session_state["result"] = new_result
+            st.session_state["cfg"] = cfg2
+            st.toast(f"{toast_msg}，已自動重掃 → 切到「📈 買入掃描」看結果", icon="✅")
+        except Exception as e:
+            st.toast(f"{toast_msg}（重掃失敗：{e}）", icon="⚠")
+    else:
+        st.toast(f"{toast_msg}（尚無掃描資料，下次掃描生效）", icon="✅")
+    st.rerun()
 
 
 def _persist_calibration_date():
@@ -1167,7 +1194,7 @@ render_header(market_state, last_scan_at, us_state=us_state)
 # Tabs
 # =====================================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["買入掃描", "持股管理", "回測", "歷史", "📖 操作教學"])
+    ["📈 買入掃描", "💼 持股管理", "🧪 回測", "🕘 歷史", "📖 操作教學"])
 
 
 # =====================================================
@@ -1596,6 +1623,18 @@ def render_results_table(df, key_prefix=""):
 
 
 with tab1:
+    # ===== 今日三步引導列（降低首步迷路）=====
+    st.markdown(
+        "<div class='today-steps'>"
+        "<span class='step'><b>①</b> 看上方大盤燈（🔴空頭別買）</span>"
+        "<span class='arrow'>→</span>"
+        "<span class='step'><b>②</b> 側欄選模式/來源，點「開始掃描」</span>"
+        "<span class='arrow'>→</span>"
+        "<span class='step'><b>③</b> 進場後到「💼 持股管理」追蹤出場</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
     # ===== 執行掃描（進度條 / log 顯示在 tab1 內）=====
     if run_btn:
         input_path = None
@@ -2424,51 +2463,50 @@ with tab3:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
-            # ===== 敏感度分析 =====
+            # ===== 敏感度（收合）=====
             st.divider()
-            st.markdown("### 敏感度分析")
-            st.caption("跑 min_score 4–7 各一次，比較不同門檻的 edge。需要先跑過一次回測。")
-            if st.button("跑敏感度", key="sens_btn"):
-                cfg = build_cfg()
-                resolved = bt.get("resolved")
-                if not resolved:
-                    st.error("缺少回測資料 — 請重跑回測")
-                else:
-                    bar2 = st.progress(0.0, text="敏感度分析中 …")
-                    def sens_progress(pct, sc):
-                        bar2.progress(min(pct, 1.0), text=f"min_score={sc}")
-                    try:
-                        sens_df = run_sensitivity(
-                            resolved, cfg, [4, 5, 6, 7],
-                            int(bt_lookback), int(bt_hold),
-                            progress_cb=sens_progress,
-                        )
-                        st.session_state["sensitivity"] = sens_df
-                    except Exception as e:
-                        st.error(f"敏感度失敗：{e}")
+            with st.expander("🔬 敏感度分析（不同 min_score 的 edge·進階）", expanded=False):
+                st.caption("跑 min_score 4–7 各一次，比較不同門檻的 edge。需要先跑過一次回測。")
+                if st.button("跑敏感度", key="sens_btn"):
+                    cfg = build_cfg()
+                    resolved = bt.get("resolved")
+                    if not resolved:
+                        st.error("缺少回測資料 — 請重跑回測")
+                    else:
+                        bar2 = st.progress(0.0, text="敏感度分析中 …")
+                        def sens_progress(pct, sc):
+                            bar2.progress(min(pct, 1.0), text=f"min_score={sc}")
+                        try:
+                            sens_df = run_sensitivity(
+                                resolved, cfg, [4, 5, 6, 7],
+                                int(bt_lookback), int(bt_hold),
+                                progress_cb=sens_progress,
+                            )
+                            st.session_state["sensitivity"] = sens_df
+                        except Exception as e:
+                            st.error(f"敏感度失敗：{e}")
 
-            if "sensitivity" in st.session_state:
-                sens_df = st.session_state["sensitivity"]
-                st.dataframe(sens_df, use_container_width=True, hide_index=True)
-                # 視覺化期望值
-                fig_s = go.Figure(go.Bar(
-                    x=sens_df["min_score"], y=sens_df["期望值R"],
-                    marker_color=["#059669" if v > 0.2 else ("#D97706" if v > 0 else "#DC2626")
-                                   for v in sens_df["期望值R"]],
-                    text=[f"{v:.2f}" for v in sens_df["期望值R"]],
-                    textposition="outside", marker_line_width=0,
-                ))
-                fig_s.update_layout(
-                    height=260, margin=dict(l=8, r=8, t=8, b=8),
-                    plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
-                    showlegend=False,
-                    xaxis_title="min_score", yaxis_title="期望值 R",
-                    font=dict(family="Inter, sans-serif", size=11),
-                )
-                fig_s.update_xaxes(showgrid=False)
-                fig_s.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
-                st.plotly_chart(fig_s, use_container_width=True,
-                                 config={"displayModeBar": False})
+                if "sensitivity" in st.session_state:
+                    sens_df = st.session_state["sensitivity"]
+                    st.dataframe(sens_df, use_container_width=True, hide_index=True)
+                    fig_s = go.Figure(go.Bar(
+                        x=sens_df["min_score"], y=sens_df["期望值R"],
+                        marker_color=["#059669" if v > 0.2 else ("#D97706" if v > 0 else "#DC2626")
+                                       for v in sens_df["期望值R"]],
+                        text=[f"{v:.2f}" for v in sens_df["期望值R"]],
+                        textposition="outside", marker_line_width=0,
+                    ))
+                    fig_s.update_layout(
+                        height=260, margin=dict(l=8, r=8, t=8, b=8),
+                        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                        showlegend=False,
+                        xaxis_title="min_score", yaxis_title="期望值 R",
+                        font=dict(family="Inter, sans-serif", size=11),
+                    )
+                    fig_s.update_xaxes(showgrid=False)
+                    fig_s.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
+                    st.plotly_chart(fig_s, use_container_width=True,
+                                     config={"displayModeBar": False})
 
             # ===== 壓力情境回測（滑價 ×N）=====
             st.divider()
@@ -2600,7 +2638,8 @@ with tab3:
                                  hide_index=True)
                     msc = next((p for p in ar["params"] if p["param"] == "min_score"), None)
                     atrp = next((p for p in ar["params"] if p["param"] == "atr_mult"), None)
-                    if st.button("套用門檻建議到側欄", key="apply_adapt_thr"):
+                    if st.button("✅ 套用門檻建議並重掃", key="apply_adapt_thr",
+                                 type="primary"):
                         applied = []
                         if msc and msc.get("recommended") is not None:
                             st.session_state["thr_enter"] = int(msc["recommended"])
@@ -2608,9 +2647,7 @@ with tab3:
                         if atrp and atrp.get("recommended") is not None:
                             st.session_state["f_atr_mult"] = float(atrp["recommended"])
                             applied.append(f"ATR×{atrp['recommended']}")
-                        st.toast("已套用：" + "、".join(applied) if applied else "無可套用建議",
-                                 icon="✅")
-                        st.rerun()
+                        _apply_and_rescan("已套用門檻：" + "、".join(applied) if applied else "無可套用建議")
                     st.caption("ℹ️ tp_mult 為回測停利框架參數，僅供回測參考，不影響即時掃描。")
 
                 # --- 評分權重 ---
@@ -2626,15 +2663,15 @@ with tab3:
                                  hide_index=True)
                     if w.get("note"):
                         st.caption(w["note"])
-                    if st.button("套用權重建議到側欄", key="apply_adapt_w"):
+                    if st.button("✅ 套用權重建議並重掃", key="apply_adapt_w",
+                                 type="primary"):
                         _m = {"breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
                               "turnover_strong": "w_turnover", "kd": "w_kd", "macd": "w_macd",
                               "rel_strength": "w_rs", "trend_confirm": "w_trend"}
                         for sc_key, ss_key in _m.items():
                             if sc_key in w["recommended"]:
                                 st.session_state[ss_key] = int(w["recommended"][sc_key])
-                        st.toast("已套用權重建議，請看側欄「評分權重」", icon="✅")
-                        st.rerun()
+                        _apply_and_rescan("已套用權重建議")
 
                 # --- 隨大盤切門檻 ---
                 rg = ar.get("regime")
@@ -2653,14 +2690,14 @@ with tab3:
                     st.dataframe(pd.DataFrame(rrows), use_container_width=True,
                                  hide_index=True)
                     st.caption("套用後，每次掃描會**依當前大盤狀態自動選用**對應門檻（即時生效）。")
-                    if st.button("套用『隨大盤切門檻』", key="apply_adapt_regime"):
+                    if st.button("✅ 套用『隨大盤切門檻』並重掃", key="apply_adapt_regime",
+                                 type="primary"):
                         st.session_state["regime_thresholds"] = {
                             k: int(rg["by_regime"][k]["recommended"])
                             for k in ("bull", "neutral", "bear")
                             if rg["by_regime"].get(k, {}).get("recommended") is not None
                         }
-                        st.toast("已啟用隨大盤切門檻（下次掃描即時生效）", icon="✅")
-                        st.rerun()
+                        _apply_and_rescan("已啟用隨大盤切門檻")
                 if st.session_state.get("regime_thresholds"):
                     _rt = st.session_state["regime_thresholds"]
                     st.success(f"✅ 隨大盤切門檻已啟用：{_rt}")
@@ -2668,9 +2705,12 @@ with tab3:
                         st.session_state.pop("regime_thresholds", None)
                         st.rerun()
 
-            # ===== 參數高原圖 =====
+            # ===== 進階驗證工具（選用）=====
             st.divider()
-            st.markdown("### 參數高原圖")
+            st.markdown("#### 🔬 進階驗證工具（選用，點按鈕才執行）")
+            st.caption("日常只需上方『績效＋OOS＋壓力測試＋自動校準』；以下為深入研究用。")
+
+            st.markdown("##### 參數高原圖")
             st.caption("掃一維參數看期望值曲線：**高原（一段都不錯）= 穩健**；**尖峰（只有一點好）= 過擬合**。建議取高原中點，別挑尖峰。")
             pl_param = st.radio(
                 "掃描參數", ["min_score", "atr_mult", "tp_mult"],
@@ -2736,8 +2776,7 @@ with tab3:
                 st.dataframe(ptab, use_container_width=True, hide_index=True)
 
             # ===== 因子增量貢獻驗證 =====
-            st.divider()
-            st.markdown("### 因子驗證（增量貢獻）")
+            st.markdown("##### 因子驗證（增量貢獻）")
             st.caption("逐棒比較「因子成立 vs 不成立」的未來平均 R；lift(R) > 0 才代表該因子真的提升期望值。減法用：lift ≈ 0 或負的因子可考慮砍掉或降權。")
             if st.button("跑因子驗證", key="factor_btn"):
                 cfg = build_cfg()
@@ -2807,7 +2846,8 @@ with tab3:
                     st.dataframe(pd.DataFrame(sug["detail"]),
                                  use_container_width=True, hide_index=True)
                     st.caption(sug.get("note", ""))
-                    if st.button("套用建議權重到側欄", key="apply_lift_weights"):
+                    if st.button("✅ 套用建議權重並重掃", key="apply_lift_weights",
+                                 type="primary"):
                         _map = {
                             "breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
                             "turnover_strong": "w_turnover", "kd": "w_kd", "macd": "w_macd",
@@ -2816,8 +2856,7 @@ with tab3:
                         for sc_key, ss_key in _map.items():
                             if sc_key in sug["weights"]:
                                 st.session_state[ss_key] = int(sug["weights"][sc_key])
-                        st.toast("已套用建議權重，請看側欄「評分權重」", icon="✅")
-                        st.rerun()
+                        _apply_and_rescan("已套用建議權重")
 
                 # 因子相關性矩陣
                 corr = fe.get("corr")
@@ -2876,12 +2915,11 @@ with tab4:
     if st.session_state.get("journal_eval"):
         je = st.session_state["journal_eval"]
         s = je["summary"]
-        m = st.columns(5)
-        m[0].metric("總訊號", s["總訊號數"])
-        m[1].metric("已結案", s["已結案"])
-        m[2].metric("勝率%", s["勝率%"] if s["勝率%"] is not None else "—")
-        m[3].metric("已結案期望值R", s["已結案期望值R"] if s["已結案期望值R"] is not None else "—")
-        m[4].metric("進行中", s["進行中"])
+        m = st.columns(4)
+        m[0].metric("已結案", f"{s['已結案']} / {s['總訊號數']}")
+        m[1].metric("勝率%", s["勝率%"] if s["勝率%"] is not None else "—")
+        m[2].metric("已結案期望值R", s["已結案期望值R"] if s["已結案期望值R"] is not None else "—")
+        m[3].metric("進行中", s["進行中"])
         _exp = s["已結案期望值R"]
         if s["已結案"] and s["已結案"] < 20:
             st.warning(f"⚠ 已結案僅 {s['已結案']} 筆 — 樣本太少，數字僅供參考，繼續累積。")
