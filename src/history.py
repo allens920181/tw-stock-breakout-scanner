@@ -1,10 +1,11 @@
 """歷史掃描紀錄：每次掃描完自動存一份摘要到 .cache/scans/"""
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+
+from .tz import now_tw
 
 SCANS_DIR = Path(".cache") / "scans"
 
@@ -16,7 +17,7 @@ def _ensure_dir():
 def save_scan(result, market_state=None, label=None):
     """存當次掃描結果（df + summary + meta）"""
     _ensure_dir()
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = now_tw().strftime("%Y%m%d_%H%M%S")
     base = SCANS_DIR / ts
 
     df = result.get("df")

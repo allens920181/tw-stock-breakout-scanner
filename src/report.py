@@ -1,7 +1,8 @@
 import os
-from datetime import datetime
 
 import pandas as pd
+
+from .tz import now_tw
 
 
 def build_dataframes(results, failed_list, stock_count, elapsed_sec):
@@ -43,7 +44,7 @@ def build_dataframes(results, failed_list, stock_count, elapsed_sec):
 
 def write_excel(df, summary, failed_df, output_dir, prefix):
     os.makedirs(output_dir, exist_ok=True)
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = now_tw().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(output_dir, f"{prefix}_{now}.xlsx")
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="全部分析結果", index=False)

@@ -19,7 +19,9 @@
 失敗（假日 / 無網路 / 改版）→ 該日略過；全失敗回空 dict，評分端優雅降級。
 """
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
+
+from .tz import today_tw
 
 import requests
 
@@ -118,7 +120,7 @@ def fetch_chips(cache_dir, days=5, verify=True, use_cache=True):
     off = 0
     # 從今天往回找交易日（以 TWSE 是否有資料為交易日判準）
     while len(history) < days and off < days + 10:
-        d = (date.today() - timedelta(days=off)).strftime("%Y%m%d")
+        d = (today_tw() - timedelta(days=off)).strftime("%Y%m%d")
         off += 1
         try:
             ok, tw = _twse_day(d, verify=verify)

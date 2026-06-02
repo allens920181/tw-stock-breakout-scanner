@@ -9,6 +9,8 @@ import io
 import logging
 import tempfile
 from datetime import datetime
+
+from src.tz import now_tw, today_tw
 from pathlib import Path
 
 import pandas as pd
@@ -387,7 +389,7 @@ def _apply_and_rescan(toast_msg="已套用設定"):
 
 def _persist_calibration_date():
     """記錄並持久化本次校準日期（給頻率提醒用）。"""
-    d = datetime.now().date().isoformat()
+    d = today_tw().isoformat()
     st.session_state["last_calibrated_date"] = d
     try:
         _p = load_prefs()
@@ -701,7 +703,7 @@ with st.sidebar:
                     "股票代號": w["code"],
                     "公司名稱": w.get("name", ""),
                     "進場價": w.get("entry", 0.0),
-                    "進場日": pd.Timestamp.today().normalize(),
+                    "進場日": pd.Timestamp(today_tw()),
                     "持有張數": w.get("lots", 1),
                 })
             new_df = pd.DataFrame(new_rows)
@@ -803,7 +805,7 @@ def _chip_cls(regime):
 
 def render_header(market_state, last_scan_at=None, us_state=None):
     """整合的 header：左側標題，右側大盤雙 chip + 日期/上次掃描"""
-    date_str = pd.Timestamp.today().strftime('%Y / %m / %d  %A')
+    date_str = now_tw().strftime('%Y / %m / %d  %A')
     chips = []
 
     def _clean(label):
@@ -1672,7 +1674,7 @@ with tab1:
             st.session_state["result"] = result
             st.session_state["scan_cache"] = result.get("scan_cache")
             st.session_state["cfg"] = cfg
-            st.session_state["last_scan_at"] = datetime.now().strftime("%H:%M:%S")
+            st.session_state["last_scan_at"] = now_tw().strftime("%H:%M:%S")
             try:
                 save_scan(result, market_state=result.get("market_state"),
                           label=mode)
@@ -1683,7 +1685,7 @@ with tab1:
             try:
                 from src.journal import log_signals
                 _added = log_signals(
-                    result["df"], datetime.now().date().isoformat(),
+                    result["df"], today_tw().isoformat(),
                     mode=mode, signals=("進場",))
                 if _added:
                     st.toast(f"已記錄 {_added} 筆進場到訊號日誌（可在『歷史』追蹤實戰績效）",
@@ -1745,7 +1747,7 @@ with tab1:
                 _lc = st.session_state.get("last_calibrated_date")
                 if _lc:
                     try:
-                        _d = (datetime.now().date() - datetime.fromisoformat(_lc).date()).days
+                        _d = (today_tw() - datetime.fromisoformat(_lc).date()).days
                         if _d < 20:
                             st.warning(f"🕒 上次校準 {_d} 天前。建議每月一次即可，"
                                        "太頻繁會慢性過擬合（OOS 失去意義）。")
@@ -2097,7 +2099,7 @@ with tab2:
         valid = valid[valid["股票代號"].astype(str).str.strip() != ""]
         cfg = build_cfg()
         holdings_list = []
-        today = pd.Timestamp.today().date()
+        today = today_tw()
         for _, row in valid.iterrows():
             code = fix_stock_code(row["股票代號"], cfg["etf_fix_map"])
             if code is None:
@@ -2124,7 +2126,7 @@ with tab2:
                     cfg=cfg, holdings=holdings_list, progress_cb=h_progress,
                 )
             st.session_state["holdings_result"] = h_result_new
-            st.session_state["holdings_analyzed_at"] = datetime.now().strftime("%H:%M:%S")
+            st.session_state["holdings_analyzed_at"] = now_tw().strftime("%H:%M:%S")
         except Exception as e:
             st.error(f"分析失敗：{e}")
         finally:
@@ -2567,7 +2569,7 @@ with tab3:
             _lastcal = st.session_state.get("last_calibrated_date")
             if _lastcal:
                 try:
-                    _days = (datetime.now().date()
+                    _days = (today_tw()
                              - datetime.fromisoformat(_lastcal).date()).days
                     if _days < 20:
                         st.warning(

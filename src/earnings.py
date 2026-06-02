@@ -13,6 +13,7 @@ from datetime import date
 import yfinance as yf
 
 from . import cache as cache_mod
+from .tz import today_tw
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def days_to_earnings(earnings_iso, today=None):
     try:
         y, m, d = (int(x) for x in str(earnings_iso)[:10].split("-"))
         ed = date(y, m, d)
-        ref = today or date.today()
+        ref = today or today_tw()
         return (ed - ref).days
     except Exception:
         return None

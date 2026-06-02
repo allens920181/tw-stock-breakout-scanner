@@ -1,12 +1,13 @@
 import os
 import pickle
-from datetime import date
 
 import pandas as pd
 
+from .tz import today_tw
+
 
 def _today():
-    return date.today().strftime("%Y%m%d")
+    return today_tw().strftime("%Y%m%d")
 
 
 def _path(cache_dir, symbol, kind, ext):

@@ -19,7 +19,9 @@
 失敗 → 回空 dict，評分端優雅降級。
 """
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
+
+from .tz import today_tw
 
 import requests
 
@@ -55,7 +57,7 @@ def _twse(verify=True):
     """上市融資券：往回找最近交易日（positional）。"""
     out = {}
     for off in range(0, 8):
-        d = (date.today() - timedelta(days=off)).strftime("%Y%m%d")
+        d = (today_tw() - timedelta(days=off)).strftime("%Y%m%d")
         url = (f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
                f"?date={d}&selectType=ALL&response=json")
         try:

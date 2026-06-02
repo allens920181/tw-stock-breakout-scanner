@@ -184,9 +184,10 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
             if bm_cfg.get("enabled", True):
                 emit("大盤判斷", 0.81, "抓大資金（外資台指期/台幣/大盤融資）")
                 try:
-                    from datetime import datetime, timedelta
+                    from datetime import timedelta
                     from .bigmoney import classify_bigmoney
-                    today = datetime.now().date()
+                    from .tz import today_tw
+                    today = today_tw()
                     mdates = [(today - timedelta(days=k)).strftime("%Y%m%d")
                               for k in range(0, 9)]
                     big_state = classify_bigmoney(
@@ -352,9 +353,10 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
             market_state = classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
             bm_cfg = cfg.get("bigmoney", {})
             if bm_cfg.get("enabled", True):
-                from datetime import datetime, timedelta
+                from datetime import timedelta
                 from .bigmoney import classify_bigmoney
-                today = datetime.now().date()
+                from .tz import today_tw
+                today = today_tw()
                 mdates = [(today - timedelta(days=k)).strftime("%Y%m%d") for k in range(0, 9)]
                 market_state["big_state"] = classify_bigmoney(
                     cache_dir=cfg["data"]["cache_dir"],
