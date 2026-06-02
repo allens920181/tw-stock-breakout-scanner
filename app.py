@@ -26,8 +26,8 @@ from src.name_lookup import lookup_names
 from src.preferences import load_prefs, save_prefs
 from src.report import write_excel
 from src.runner import (
-    run_backtest, run_factor_eval, run_holdings_scan, run_plateau,
-    run_scan, run_sensitivity,
+    run_adaptive_recommend, run_backtest, run_factor_eval, run_holdings_scan,
+    run_plateau, run_scan, run_sensitivity,
 )
 from src.universe import fetch_twse_universe
 
@@ -591,6 +591,34 @@ with st.sidebar:
             help=HELP["thr_watch"],
         )
 
+    with st.expander("進階濾網（成本 / 潛伏 RS）", expanded=False):
+        _bca = base_cfg.get("costs", {})
+        _amba = base_cfg.get("strategy", {}).get("ambush", {})
+        st.slider(
+            "回測滑價（單邊 %）", 0.0, 0.5,
+            float(st.session_state.get("cost_slip", _bca.get("slippage_pct", 0.0015) * 100)),
+            0.05, key="cost_slip",
+            help="小型股突破成交常偏離訊號價；買貴/賣便宜各扣此%。讓回測數字更誠實。",
+        )
+        st.slider(
+            "ATR 停損倍數", 1.0, 4.0,
+            float(st.session_state.get("f_atr_mult", base_cfg["filters"].get("atr_mult", 1.5))),
+            0.5, key="f_atr_mult",
+            help="停損 = 進場價 − ATR14 × 此倍數。建議模式可自動校準到高原中心。",
+        )
+        st.checkbox(
+            "潛伏模式：RS 硬門檻（排除弱於大盤）",
+            value=bool(st.session_state.get("amb_rs_gate", _amba.get("require_positive_rs", True))),
+            key="amb_rs_gate",
+            help="開啟後，相對強度 RS < 門檻的弱勢股即使蓄勢成立也只給「觀察·弱於大盤」，不給進場。",
+        )
+        st.slider(
+            "RS 門檻（%）", -5.0, 10.0,
+            float(st.session_state.get("amb_min_rs", _amba.get("min_rs", 0.0))),
+            0.5, key="amb_min_rs",
+            help="個股 60 日報酬須 ≥ 大盤 + 此值。0=只要不輸大盤；正值=要明顯強過大盤。",
+        )
+
     st.divider()
     with st.expander("偏好設定", expanded=False):
         st.caption("儲存後下次啟動會自動套用")
@@ -661,6 +689,21 @@ def build_cfg():
     cfg["scoring"]["thresholds"] = {
         "enter": thr_enter, "watch": thr_watch,
     }
+    # 建議模式：依大盤切門檻（套用後存於 session）
+    rg_thr = st.session_state.get("regime_thresholds")
+    if rg_thr:
+        cfg["scoring"]["regime_thresholds"] = rg_thr
+    # ATR 停損倍數（建議模式可校準）
+    cfg["filters"]["atr_mult"] = float(
+        st.session_state.get("f_atr_mult", base_cfg["filters"].get("atr_mult", 1.5)))
+    # 潛伏 RS 硬門檻（側欄可調）
+    cfg.setdefault("strategy", {}).setdefault("ambush", {})
+    cfg["strategy"]["ambush"]["require_positive_rs"] = bool(
+        st.session_state.get("amb_rs_gate",
+                             base_cfg.get("strategy", {}).get("ambush", {}).get("require_positive_rs", True)))
+    cfg["strategy"]["ambush"]["min_rs"] = float(
+        st.session_state.get("amb_min_rs",
+                             base_cfg.get("strategy", {}).get("ambush", {}).get("min_rs", 0.0)))
     cfg["position_sizing"] = {
         "total_capital": int(total_capital),
         "risk_per_trade_pct": risk_pct,
@@ -675,6 +718,7 @@ def build_cfg():
         "fee_rate": float(st.session_state.get("cost_fee", base_costs.get("fee_rate", 0.001425) * 100)) / 100,
         "fee_discount": float(st.session_state.get("cost_disc", base_costs.get("fee_discount", 1.0))),
         "tax_rate": float(st.session_state.get("cost_tax", base_costs.get("tax_rate", 0.003) * 100)) / 100,
+        "slippage_pct": float(st.session_state.get("cost_slip", base_costs.get("slippage_pct", 0.0015) * 100)) / 100,
         "apply_to_factor_eval": bool(st.session_state.get("cost_apply_fe", base_costs.get("apply_to_factor_eval", False))),
     }
     return cfg
@@ -2281,6 +2325,141 @@ with tab3:
                 fig_s.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
                 st.plotly_chart(fig_s, use_container_width=True,
                                  config={"displayModeBar": False})
+
+            # ===== 自動校準（建議模式）=====
+            st.divider()
+            st.markdown("### 🎯 自動校準（建議模式）")
+            st.caption(
+                "把回測**回饋**到選股參數：系統算出建議值，**你一鍵套用**（不自動改）。"
+                "取「參數高原中心」非最高峰、避免過擬合；每項附 **OOS 同向檢核**——"
+                "樣本內決定、樣本外驗證，✅ 才建議套用。"
+            )
+            ac1, ac2 = st.columns([2, 1])
+            ac_targets = ac1.multiselect(
+                "校準對象",
+                ["thresholds", "weights", "regime"],
+                default=["thresholds", "weights", "regime"],
+                format_func=lambda x: {"thresholds": "進場門檻(min_score/atr/tp)",
+                                       "weights": "評分權重(7因子)",
+                                       "regime": "隨大盤切門檻"}[x],
+                key="adapt_targets",
+            )
+            run_adapt = ac2.button("跑自動校準", key="adapt_btn",
+                                   use_container_width=True)
+            if run_adapt:
+                resolved = bt.get("resolved")
+                if not resolved:
+                    st.error("缺少回測資料 — 請重跑回測")
+                elif not ac_targets:
+                    st.warning("請至少選一個校準對象")
+                else:
+                    cfg = build_cfg()
+                    fe_cached = st.session_state.get("factor_eval")
+                    bar_a = st.progress(0.0, text="自動校準中 …")
+
+                    def _ac_cb(p, msg):
+                        try:
+                            bar_a.progress(min(p, 1.0), text=f"校準：{msg}")
+                        except Exception:
+                            pass
+                    try:
+                        st.session_state["adapt_result"] = run_adaptive_recommend(
+                            resolved, cfg, lookback_days=int(bt_lookback),
+                            hold_days=int(bt_hold), targets=tuple(ac_targets),
+                            fe_result=fe_cached, progress_cb=_ac_cb,
+                        )
+                    except Exception as e:
+                        st.error(f"自動校準失敗：{e}")
+                    bar_a.progress(1.0, text="完成")
+
+            if "adapt_result" in st.session_state:
+                ar = st.session_state["adapt_result"]
+
+                # --- 進場門檻 ---
+                if ar.get("params"):
+                    _pl = {"min_score": "最低評分 min_score", "atr_mult": "ATR停損倍數",
+                           "tp_mult": "停利倍數 tp_mult"}
+                    rows = []
+                    for p in ar["params"]:
+                        oos = p.get("oos_ok")
+                        rows.append({
+                            "參數": _pl.get(p["param"], p["param"]),
+                            "目前": p.get("current"),
+                            "建議": p.get("recommended") if p.get("recommended") is not None else "—（無明顯高原）",
+                            "OOS同向": "✅" if oos else ("❌" if oos is False else "—"),
+                        })
+                    st.markdown("**進場門檻建議**（高原中心）")
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True,
+                                 hide_index=True)
+                    msc = next((p for p in ar["params"] if p["param"] == "min_score"), None)
+                    atrp = next((p for p in ar["params"] if p["param"] == "atr_mult"), None)
+                    if st.button("套用門檻建議到側欄", key="apply_adapt_thr"):
+                        applied = []
+                        if msc and msc.get("recommended") is not None:
+                            st.session_state["thr_enter"] = int(msc["recommended"])
+                            applied.append(f"進場門檻={int(msc['recommended'])}")
+                        if atrp and atrp.get("recommended") is not None:
+                            st.session_state["f_atr_mult"] = float(atrp["recommended"])
+                            applied.append(f"ATR×{atrp['recommended']}")
+                        st.toast("已套用：" + "、".join(applied) if applied else "無可套用建議",
+                                 icon="✅")
+                        st.rerun()
+                    st.caption("ℹ️ tp_mult 為回測停利框架參數，僅供回測參考，不影響即時掃描。")
+
+                # --- 評分權重 ---
+                w = ar.get("weights")
+                if w and w.get("recommended"):
+                    st.markdown("**評分權重建議**（因子 lift）")
+                    _wl = {"breakout_with_volume": "突破+量", "ma_bullish": "均線多頭",
+                           "turnover_strong": "換手率", "kd": "KD", "macd": "MACD",
+                           "rel_strength": "相對強度", "trend_confirm": "趨勢確認"}
+                    wrows = [{"因子": _wl.get(k, k), "目前": w["current"].get(k),
+                              "建議": w["recommended"].get(k)} for k in w["recommended"]]
+                    st.dataframe(pd.DataFrame(wrows), use_container_width=True,
+                                 hide_index=True)
+                    if w.get("note"):
+                        st.caption(w["note"])
+                    if st.button("套用權重建議到側欄", key="apply_adapt_w"):
+                        _m = {"breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
+                              "turnover_strong": "w_turnover", "kd": "w_kd", "macd": "w_macd",
+                              "rel_strength": "w_rs", "trend_confirm": "w_trend"}
+                        for sc_key, ss_key in _m.items():
+                            if sc_key in w["recommended"]:
+                                st.session_state[ss_key] = int(w["recommended"][sc_key])
+                        st.toast("已套用權重建議，請看側欄「評分權重」", icon="✅")
+                        st.rerun()
+
+                # --- 隨大盤切門檻 ---
+                rg = ar.get("regime")
+                if rg and rg.get("by_regime"):
+                    st.markdown("**隨大盤切門檻建議**（各盤勢最佳 min_score）")
+                    lbl = rg.get("labels", {})
+                    rrows = []
+                    for k in ("bull", "neutral", "bear"):
+                        v = rg["by_regime"].get(k, {})
+                        rrows.append({
+                            "大盤": lbl.get(k, k),
+                            "建議進場門檻": v.get("recommended"),
+                            "期望值R": v.get("expectancy") if not v.get("fallback") else "樣本不足→回退整體",
+                            "樣本數": v.get("n"),
+                        })
+                    st.dataframe(pd.DataFrame(rrows), use_container_width=True,
+                                 hide_index=True)
+                    st.caption("套用後，每次掃描會**依當前大盤狀態自動選用**對應門檻（即時生效）。")
+                    if st.button("套用『隨大盤切門檻』", key="apply_adapt_regime"):
+                        st.session_state["regime_thresholds"] = {
+                            k: int(rg["by_regime"][k]["recommended"])
+                            for k in ("bull", "neutral", "bear")
+                            if rg["by_regime"].get(k, {}).get("recommended") is not None
+                        }
+                        st.toast("已啟用隨大盤切門檻（下次掃描即時生效）", icon="✅")
+                        st.rerun()
+                if st.session_state.get("regime_thresholds"):
+                    _rt = st.session_state["regime_thresholds"]
+                    st.success(f"✅ 隨大盤切門檻已啟用：{_rt}")
+                    if st.button("停用隨大盤切門檻", key="clear_adapt_regime"):
+                        st.session_state.pop("regime_thresholds", None)
+                        st.rerun()
 
             # ===== 參數高原圖 =====
             st.divider()

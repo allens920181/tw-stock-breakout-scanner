@@ -170,6 +170,14 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
                 market_state["position_factor"] = combined_factor
                 market_state["us_state"] = us_state
 
+    # 隨大盤切門檻（建議模式套用後）：依當前 regime 覆寫進場門檻 enter
+    rg_thr = cfg.get("scoring", {}).get("regime_thresholds")
+    if rg_thr and market_state and market_state.get("regime") in rg_thr:
+        new_enter = rg_thr[market_state["regime"]]
+        cfg["scoring"]["thresholds"]["enter"] = new_enter
+        emit("分析", 0.815,
+             f"依大盤（{market_state.get('regime')}）套用進場門檻 enter={new_enter}")
+
     mode = cfg.get("strategy", {}).get("mode", "breakout")
     analyze_fn = analyze_ambush if mode == "ambush" else analyze_stock
     emit("分析", 0.82, f"逐檔分析 {len(resolved)} 檔（模式：{mode}）")
@@ -460,6 +468,17 @@ def run_weight_suggest(cfg, fe_result=None, resolved=None,
         total=lw.get("total", 8),
         eps=lw.get("eps", 0.02),
         preserve_unverifiable=lw.get("preserve_unverifiable", ["turnover_strong"]),
+    )
+
+
+def run_adaptive_recommend(resolved, cfg, lookback_days=120, hold_days=10,
+                           targets=("thresholds", "weights", "regime"),
+                           fe_result=None, progress_cb=None):
+    """建議模式：依回測自動產生參數/權重/regime 門檻建議（只建議，不自動套用）。"""
+    from .adaptive import recommend_from_backtest
+    return recommend_from_backtest(
+        resolved, cfg, lookback=lookback_days, hold_days=hold_days,
+        targets=targets, fe_result=fe_result, progress_cb=progress_cb,
     )
 
 
