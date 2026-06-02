@@ -50,12 +50,34 @@ def load_holdings(file_path, etf_fix_map):
     return items
 
 
+def _holding_alerts(chips, revenue, market_state):
+    """持股期間主動警示：籌碼翻空 / 營收變臉 / 大盤·大資金轉空。回 list[str]。"""
+    alerts = []
+    if chips:
+        inst = chips.get("inst_net_lots")
+        foreign = chips.get("foreign_net_lots")
+        if inst is not None and inst < 0:
+            alerts.append(f"法人轉賣超{abs(inst):,}張")
+        elif foreign is not None and foreign < 0:
+            alerts.append(f"外資轉賣{abs(foreign):,}張")
+    if revenue and revenue.get("yoy_pct") is not None and revenue["yoy_pct"] <= -20:
+        alerts.append(f"營收年減{abs(revenue['yoy_pct']):.0f}%")
+    if market_state:
+        if market_state.get("regime") == "bear":
+            alerts.append("大盤轉空")
+        big = market_state.get("big_state")
+        if big and big.get("position_factor", 1.0) <= 0.5:
+            alerts.append("大資金轉空")
+    return alerts
+
+
 def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
                     time_stop_days=10, profit_taking_at_1r=True,
-                    atr_trail_mult=3.0):
+                    atr_trail_mult=3.0, chips=None, revenue=None, market_state=None):
     """
     產生持股賣出建議。
     atr_trail_mult: Chandelier 移動停利 = 進場後最高價 - ATR14 × 此倍數
+    chips/revenue/market_state: 持股期間主動示警（籌碼翻空/營收變臉/大盤轉空）
     """
     if df is None or df.empty or len(df) < 60:
         return _row(symbol, name, market, entry_price, entry_date, shares,
@@ -166,9 +188,20 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     }
 
     label, qty, note = actions[0]
-    return _row(symbol, name, market, entry_price, entry_date, shares,
-                close, profit_pct, r_multiple, held_days, "成功", label, note, qty,
-                exit_plan=exit_plan)
+
+    # ===== 持股期間主動警示（籌碼翻空 / 營收變臉 / 大盤·大資金轉空）=====
+    alerts = _holding_alerts(chips, revenue, market_state)
+    alert_str = " · ".join(alerts) if alerts else "—"
+    # 若目前判定「續抱」但出現警示 → 升級為「留意減碼」（讓利潤奔跑也要設防）
+    if alerts and label.startswith("✅ 續抱"):
+        label = "⚠ 續抱·留意減碼"
+        note = note + f"（警示：{alert_str}）"
+
+    row = _row(symbol, name, market, entry_price, entry_date, shares,
+               close, profit_pct, r_multiple, held_days, "成功", label, note, qty,
+               exit_plan=exit_plan)
+    row["主動警示"] = alert_str
+    return row
 
 
 def _row(symbol, name, market, entry_price, entry_date, shares,

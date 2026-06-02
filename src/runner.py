@@ -330,6 +330,39 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
     sym_to_df = {r["symbol"]: r for r in resolved}
     code_to_resolved = {r["symbol"].split(".")[0]: r for r in resolved}
 
+    # 持股期間主動示警所需的籌碼/營收/大盤（best-effort，失敗不影響出場規則）
+    chips_map, revenue_map, market_state = {}, {}, None
+    try:
+        if cfg.get("chips", {}).get("enabled", True):
+            chips_map = fetch_chips(
+                cfg["data"]["cache_dir"],
+                days=cfg.get("chips", {}).get("streak_days", 5),
+                verify=cfg.get("chips", {}).get("verify_ssl", True))
+    except Exception as e:
+        log.warning("持股籌碼抓取失敗：%s", e)
+    try:
+        if cfg.get("revenue", {}).get("enabled", True):
+            revenue_map = fetch_revenue(
+                cfg["data"]["cache_dir"],
+                verify=cfg.get("revenue", {}).get("verify_ssl", True))
+    except Exception as e:
+        log.warning("持股營收抓取失敗：%s", e)
+    try:
+        if cfg.get("market_filter", {}).get("enabled", True):
+            market_state = classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
+            bm_cfg = cfg.get("bigmoney", {})
+            if bm_cfg.get("enabled", True):
+                from datetime import datetime, timedelta
+                from .bigmoney import classify_bigmoney
+                today = datetime.now().date()
+                mdates = [(today - timedelta(days=k)).strftime("%Y%m%d") for k in range(0, 9)]
+                market_state["big_state"] = classify_bigmoney(
+                    cache_dir=cfg["data"]["cache_dir"],
+                    verify=bm_cfg.get("verify_ssl", True),
+                    margin_dates=mdates, weights=bm_cfg.get("weights"))
+    except Exception as e:
+        log.warning("持股大盤判斷失敗：%s", e)
+
     rows = []
     for h in holdings:
         # 兼容舊 key "lots" 與新 key "shares"（舊 lots × 1000 = shares）
@@ -355,6 +388,9 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
         row = analyze_holding(
             r["symbol"], r["company_name"] or h["company_name"], r["market"],
             r["df"], h["entry_price"], h["entry_date"], shares_val,
+            chips=chips_map.get(h["code"]),
+            revenue=revenue_map.get(h["code"]),
+            market_state=market_state,
         )
         rows.append(row)
 
@@ -507,6 +543,47 @@ def run_weight_suggest(cfg, fe_result=None, resolved=None,
         eps=lw.get("eps", 0.02),
         preserve_unverifiable=lw.get("preserve_unverifiable", ["turnover_strong"]),
     )
+
+
+def run_evaluate_journal(cfg, records=None, progress_cb=None):
+    """前向訊號日誌（live OOS）：抓日誌標的後續 OHLC → 模擬出場 → 彙整實戰績效。"""
+    from .journal import (
+        evaluate_journal, load_journal, summarize_journal,
+    )
+
+    def emit(stage, pct, msg):
+        log.info("[%s] %s", stage, msg)
+        if progress_cb:
+            try:
+                progress_cb(stage, pct, msg)
+            except Exception:
+                pass
+
+    cache_mod.ensure_dir(cfg["data"]["cache_dir"])
+    if records is None:
+        records = load_journal()
+    if not records:
+        return {"evaluated": [], "summary": summarize_journal([]), "records": []}
+
+    codes = sorted({str(r.get("股票", "")).split(".")[0] for r in records if r.get("股票")})
+    items = [{"code": c, "company_name": ""} for c in codes if c]
+    emit("評估日誌", 0.2, f"抓 {len(items)} 檔後續價格")
+    resolved, _ = resolve_markets_and_data(
+        items, cfg["data"]["period"], cfg["data"]["cache_dir"],
+        chunk_size=cfg["data"].get("chunk_size", 50),
+        chunk_sleep=cfg["data"].get("chunk_sleep", 1.0),
+    )
+    df_map = {}
+    for r in resolved:
+        df = r["df"]
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df_map[r["symbol"]] = df
+    emit("評估日誌", 0.7, "模擬出場、計算實際 R")
+    evaluated = evaluate_journal(records, df_map)
+    summary = summarize_journal(evaluated)
+    emit("完成", 1.0, f"已結案 {summary['已結案']} 筆，進行中 {summary['進行中']} 筆")
+    return {"evaluated": evaluated, "summary": summary, "records": records}
 
 
 def run_stress_test(resolved, cfg, mult=3.0, lookback_days=120, hold_days=10,
