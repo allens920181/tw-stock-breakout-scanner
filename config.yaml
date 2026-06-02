@@ -20,7 +20,10 @@ strategy:
     vol_contraction: 0.85      # 近 5 日均量 < 此倍×20 日均量 = 量縮（蓄勢）
     near_high_pct: 8.0         # 距 20 日高 ≤ 此% 且未突破 = 接近邊緣
     max_above_ma20_pct: 8.0    # 站穩 MA20 但乖離 ≤ 此%（不過熱）
-    enter_score: 6             # 潛伏總分(10) ≥ 此 → 進場(埋伏)
+    squeeze_ratio: 0.9         # 近10日區間 < 前10日×此 = 波動收斂中（彈簧壓緊）
+    accum_min_streak: 3        # 法人連買 ≥ 此天數才算「強吸籌」
+    require_breakout_confirm: true  # 兩段式：未突破=觀察待發、帶量突破才轉進場（提高啟動命中）
+    enter_score: 6             # 蓄勢品質分(10) ≥ 此 → 可進場
     watch_score: 4
     min_risk_pct: 0.03         # 窄箱停損下限（避免被噪音掃出）
 

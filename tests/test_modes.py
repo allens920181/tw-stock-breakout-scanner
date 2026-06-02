@@ -56,3 +56,26 @@ def test_early_mode_downgrades_stale_breakout():
     # early 不會比 breakout 更激進（訊號不更強）
     rank = {"進場": 2, "觀察": 1, "不操作": 0, "無法分析": -1}
     assert rank[re["訊號判斷"]] <= rank[rb["訊號判斷"]]
+
+
+def _coil_df(last, vol_recent, n=160):
+    amp = np.concatenate([np.full(80, 3.0), np.linspace(3.0, 0.6, 80)])  # 波動收斂
+    base = 100 + np.sin(np.linspace(0, 12, n)) * amp
+    base[-1] = last
+    vol = np.concatenate([np.full(n - 5, 2e6), np.full(5, vol_recent)])
+    return pd.DataFrame({
+        "Open": base, "High": base + amp * 0.4, "Low": base - amp * 0.4,
+        "Close": base, "Volume": vol,
+    }, index=pd.date_range("2024-01-01", periods=n, freq="B"))
+
+
+def test_ambush_two_stage_confirm():
+    chips = {"inst_net_lots": 5000, "foreign_net_lots": 3000, "inst_buy_streak": 4}
+    # 未突破 → 觀察待突破；帶量突破 → 進場確認
+    pend = analyze_ambush("A", "x", "TW", _coil_df(101.6, 1.1e6), 5e9, cfg=CFG, chips=chips)
+    broke = analyze_ambush("B", "x", "TW", _coil_df(104.5, 5e6), 5e9, cfg=CFG, chips=chips)
+    assert pend["訊號判斷"] == "觀察" and "待突破" in pend["操作建議"]
+    assert broke["訊號判斷"] == "進場" and "突破確認" in broke["操作建議"]
+    # 已啟動的就緒度應更高
+    assert broke["啟動就緒度"] >= pend["啟動就緒度"]
+    assert "啟動就緒度" in pend and 0 <= pend["啟動就緒度"] <= 100

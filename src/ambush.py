@@ -63,7 +63,10 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
     else:
         turnover_rate = avg_turnover_20 = None
 
-    # ===== 潛伏條件 =====
+    # ===== 潛伏條件（蓄勢彈簧）=====
+    def _clip(x, lo=0.0, hi=1.0):
+        return max(lo, min(hi, float(x)))
+
     last20 = df["Close"].iloc[-21:-1]
     mean_c, std_c = float(last20.mean()), float(last20.std())
     base_vol = std_c / mean_c if mean_c > 0 else 1.0
@@ -71,23 +74,54 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
 
     cond_vol_dry = vol5 < vol20 * amb.get("vol_contraction", 0.85)
 
+    # 波動「收斂中」：近 10 日區間 < 前 10 日區間（彈簧越壓越緊 = 越接近爆發）
+    recent_rng = float(df["High"].iloc[-10:].max() - df["Low"].iloc[-10:].min())
+    prior_rng = float(df["High"].iloc[-20:-10].max() - df["Low"].iloc[-20:-10].min())
+    squeeze_ratio = recent_rng / prior_rng if prior_rng > 0 else 1.0
+    cond_squeeze = squeeze_ratio < amb.get("squeeze_ratio", 0.9)
+
     above_ma20_pct = (close / ma20 - 1) * 100 if ma20 > 0 else 99
     cond_hold = close > ma20 and above_ma20_pct <= amb.get("max_above_ma20_pct", 8.0)
 
     dist_high_pct = (high_20 - close) / high_20 * 100 if high_20 > 0 else 99
-    cond_near = (close <= high_20) and (0 <= dist_high_pct <= amb.get("near_high_pct", 8.0))
-
     cond_kd_room = (40 <= k_v <= 70) and (k_v > d_v)
 
     inst_lots = chips.get("inst_net_lots") if chips else None
     buy_streak = chips.get("inst_buy_streak") if chips else None
+    foreign_lots = chips.get("foreign_net_lots") if chips else None
+    min_streak = amb.get("accum_min_streak", 3)
     cond_accum = bool(inst_lots is not None and inst_lots > 0)
+    strong_accum = bool(cond_accum and (buy_streak or 0) >= min_streak)
 
-    weights = {"base": 2, "vol_dry": 1, "hold": 2, "near": 2, "kd_room": 1, "accum": 2}
-    conds = {"base": cond_base, "vol_dry": cond_vol_dry, "hold": cond_hold,
-             "near": cond_near, "kd_room": cond_kd_room, "accum": cond_accum}
+    # 蓄勢品質分（描述「彈簧」好不好，10 分）
+    weights = {"base": 2, "squeeze": 2, "vol_dry": 1, "hold": 2, "kd_room": 1, "accum": 2}
+    conds = {"base": cond_base, "squeeze": cond_squeeze, "vol_dry": cond_vol_dry,
+             "hold": cond_hold, "kd_room": cond_kd_room, "accum": cond_accum}
     score = sum(weights[k] * int(conds[k]) for k in weights)
     max_total = sum(weights.values())
+
+    # ===== 觸發：是否「帶量突破箱頂」= 啟動確認 =====
+    broke = bool(close > high_20 and latest["Volume"] > vol20 * 1.2)
+
+    # ===== 啟動就緒度（0~100，讓你直覺挑「即將啟動」）=====
+    sq_s = _clip((1 - squeeze_ratio) / 0.5)                 # 收斂越緊越高
+    dry_s = _clip((1 - vol5 / vol20) / 0.3) if vol20 else 0  # 量越縮越高
+    near_s = _clip(1 - dist_high_pct / max(amb.get("near_high_pct", 8.0), 1e-9)) if dist_high_pct >= 0 else 0.3
+    acc_s = _clip((buy_streak or 0) / 5) + (0.2 if (foreign_lots or 0) > 0 else 0)
+    acc_s = _clip(acc_s)
+    base_q = 0.6 + 0.4 * (1 if cond_base else 0.3)
+    readiness = (30 * sq_s + 25 * near_s + 25 * acc_s + 20 * dry_s) * base_q
+    if broke:
+        readiness = max(readiness, 80.0)
+    readiness = round(readiness, 0)
+    if broke:
+        launch_label = "⚡ 已啟動"
+    elif readiness >= 70:
+        launch_label = "⚡ 即將啟動"
+    elif readiness >= 45:
+        launch_label = "🔋 蓄勢中"
+    else:
+        launch_label = "🌱 醞釀早期"
 
     # ===== 進出場（埋伏現價、停損在箱底）=====
     atr = float(latest["ATR14"]) if pd.notna(latest.get("ATR14")) else None
@@ -99,7 +133,6 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         stop = entry * 0.95
     risk = entry - stop
     risk_pct = risk / entry if entry > 0 else 0
-    # 潛伏在窄箱裡停損常很緊（這是優點），但給一個合理下限避免被噪音掃出
     min_box_risk = amb.get("min_risk_pct", 0.03)
     if 0 < risk_pct < min_box_risk:
         stop = entry * (1 - min_box_risk)
@@ -108,12 +141,18 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
     target_1r, target_2r = calc_targets(entry, stop)
     rr = 2.0 if risk > 0 else None
 
+    # ===== 訊號（兩段式：未突破=觀察待發、帶量突破=進場啟動）=====
+    require_confirm = amb.get("require_breakout_confirm", True)
     enter_thr = amb.get("enter_score", 6)
     watch_thr = amb.get("watch_score", 4)
+    pending = False
     if rr is None and score >= enter_thr:
         signal, status = "觀察", "成功（停損距離過近）"
     elif score >= enter_thr:
-        signal, status = "進場", "成功"
+        if require_confirm and not broke:
+            signal, status, pending = "觀察", "成功（蓄勢待突破）", True
+        else:
+            signal, status = "進場", "成功（突破確認）" if broke else "成功"
     elif score >= watch_thr:
         signal, status = "觀察", "成功"
     else:
@@ -181,23 +220,27 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
     elif signal == "進場" and pos["suggested_lots"] == 0:
         action, grade, reason = "資金不足", "避開", "資金不足"
     elif signal == "進場":
-        action = "埋伏 · 潛伏"
+        action = "進場 · 突破確認" if broke else "埋伏 · 潛伏"
         red = [w for w in (chip_warn, margin_warn, earn_warn) if w]
         pos_r = []
+        if broke:
+            pos_r.append("帶量突破")
+        if cond_squeeze:
+            pos_r.append("波動收斂")
         if cond_base:
             pos_r.append("窄幅整理")
-        if cond_vol_dry:
-            pos_r.append("量縮蓄勢")
-        if cond_accum:
+        if strong_accum:
             pos_r.append(chip_confirm)
-        if cond_near:
-            pos_r.append("逼近突破")
-        grade = "A" if (cond_accum and cond_near and not red) else "B"
+        elif cond_accum:
+            pos_r.append("法人買超")
+        grade = "A" if ((broke or readiness >= 70) and strong_accum and not red) else "B"
         reason = "＋".join(pos_r[:3]) if pos_r else "蓄勢"
         if red:
             reason += "（注意：" + "、".join(red) + "）"
     elif signal == "觀察":
-        action, grade, reason = "觀察", "C", "蓄勢未足"
+        action = "觀察 · 待突破" if pending else "觀察"
+        grade = "C"
+        reason = f"{launch_label}（{int(readiness)}）" if pending else "蓄勢未足"
     else:
         action, grade, reason = "不操作", "避開", "未達潛伏條件"
 
@@ -208,6 +251,7 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         "狀態": status, "訊號判斷": signal, "評分": score,
         "評分顯示": f"{score} / {max_total}",
         "操作建議": action, "綜合評級": grade, "評級理由": reason,
+        "啟動就緒度": int(readiness), "啟動標籤": launch_label,
         "進場類型": "潛伏",
         "進場條件": f"窄幅{base_vol*100:.1f}% 量縮{vol5/vol20:.2f}× 距高{dist_high_pct:.1f}%",
         "收盤價": round(close, 2),
@@ -244,6 +288,8 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         "MA20": round(ma20, 2), "MA60": round(ma60, 2),
         "K": round(k_v, 2), "D": round(d_v, 2),
         # 潛伏條件布林
-        "窄幅整理": cond_base, "量縮蓄勢": cond_vol_dry, "站穩MA20": cond_hold,
-        "逼近突破": cond_near, "KD有空間": cond_kd_room, "法人吸籌": cond_accum,
+        "窄幅整理": cond_base, "波動收斂": cond_squeeze, "量縮蓄勢": cond_vol_dry,
+        "站穩MA20": cond_hold, "KD有空間": cond_kd_room,
+        "法人吸籌": cond_accum, "帶量突破": broke,
+        "距20日高%": round(dist_high_pct, 1),
     }

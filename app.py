@@ -1229,9 +1229,18 @@ def render_top_candidates(df, ohlc_map, n=10):
                 reason = main_r.rstrip("（")
             lights = _pillar_lights(row)
             lights_html = "　".join([f"{lab}{dot}" for lab, dot in lights])
+            # 潛伏模式：顯示啟動就緒度
+            readiness = row.get("啟動就緒度", None)
+            launch_tag = str(row.get("啟動標籤", ""))
+            launch_html = ""
+            if readiness is not None and pd.notna(readiness):
+                rc = "#059669" if readiness >= 70 else ("#D97706" if readiness >= 45 else "#94A3B8")
+                launch_html = (f"<span style='font-size:12px;font-weight:700;color:{rc};'>"
+                               f"{launch_tag} {int(readiness)}</span>")
             st.markdown(
                 f"<div style='display:flex;align-items:center;gap:10px;margin:2px 0 2px;'>"
                 f"<span style='font-size:15px;font-weight:700;color:{gcolor};'>{emoji} {grade}級 {glabel}</span>"
+                f"{launch_html}"
                 f"<span style='font-size:12px;color:#475569;'>{reason}</span>"
                 f"<span style='margin-left:auto;font-size:12px;'>{lights_html}</span>"
                 f"</div>", unsafe_allow_html=True)
@@ -1376,7 +1385,8 @@ def render_results_table(df, key_prefix=""):
 
     # 精簡欄位（預設）
     minimal_cols = [
-        "股票", "公司名稱", "綜合評級", "評級理由", "操作建議", "評分顯示",
+        "股票", "公司名稱", "綜合評級", "啟動標籤", "啟動就緒度", "評級理由",
+        "操作建議", "評分顯示",
         "目前現價", "進場參考價", "現價偏離%", "停損價", "目標價1(+1R半倉)",
         "風險%", "建議張數", "換手率%", "籌碼確認",
     ]
@@ -1423,6 +1433,13 @@ def render_results_table(df, key_prefix=""):
     if "綜合評級" in display.columns:
         col_cfg["綜合評級"] = st.column_config.TextColumn(
             "綜合評級", help="A=強力進場 / B=可進場 / C=觀察 / 避開。綜合技術+籌碼+RS+風險的一眼結論。")
+    if "啟動就緒度" in display.columns:
+        col_cfg["啟動就緒度"] = st.column_config.ProgressColumn(
+            "啟動就緒度", min_value=0, max_value=100, format="%d",
+            help="潛伏標的『即將啟動』的程度(0~100)：波動收斂+逼近突破+法人吸籌+量縮。越高越接近發動，點欄位標題可排序。")
+    if "啟動標籤" in display.columns:
+        col_cfg["啟動標籤"] = st.column_config.TextColumn(
+            "啟動標籤", help="⚡已啟動/即將啟動 > 🔋蓄勢中 > 🌱醞釀早期")
     if "評分顯示" in display.columns:
         col_cfg["評分顯示"] = st.column_config.TextColumn("評分顯示", help=HELP["score"])
     if "RR比" in display.columns:

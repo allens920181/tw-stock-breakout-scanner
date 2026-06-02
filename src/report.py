@@ -10,9 +10,14 @@ def build_dataframes(results, failed_list, stock_count, elapsed_sec):
         if col not in df.columns:
             df[col] = None
 
+    # 潛伏模式優先用「啟動就緒度」排序（最接近發動的在前）
+    if "啟動就緒度" in df.columns:
+        sort_by = ["啟動就緒度", "評分", "RR比"]
+    else:
+        sort_by = ["評分", "換手率%", "RR比"]
     df = df.sort_values(
-        by=["評分", "換手率%", "RR比"],
-        ascending=[False, False, False],
+        by=sort_by,
+        ascending=[False] * len(sort_by),
         na_position="last",
     )
 
