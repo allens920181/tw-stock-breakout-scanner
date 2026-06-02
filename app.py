@@ -146,6 +146,24 @@ h3 { font-weight: 600 !important; font-size: 1.0rem !important; margin-top: 1.2r
 .hdr-status .sep { color: var(--border); margin: 0 4px; }
 .hdr-detail { color: var(--muted); }
 
+/* 綜合判斷建議列 */
+.hdr-advice {
+  display: flex; align-items: center; gap: 7px;
+  margin: 8px 0 4px 0; padding: 8px 13px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; line-height: 1.4;
+  border: 1px solid var(--border, #E2E8F0); background: var(--surface, #F8FAFC);
+}
+.hdr-advice .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.hdr-advice b { font-weight: 700; margin-right: 2px; }
+.hdr-advice.bull    { border-left: 4px solid var(--positive); background: rgba(5,150,105,.06); }
+.hdr-advice.bull .dot { background: var(--positive); }
+.hdr-advice.bear    { border-left: 4px solid var(--negative); background: rgba(220,38,38,.06); }
+.hdr-advice.bear .dot { background: var(--negative); }
+.hdr-advice.neutral { border-left: 4px solid var(--warning); background: rgba(217,119,6,.06); }
+.hdr-advice.neutral .dot { background: var(--warning); }
+.hdr-advice.unknown { border-left: 4px solid var(--subtle); }
+.hdr-advice.unknown .dot { background: var(--subtle); }
+
 /* 今日三步引導列 */
 .today-steps {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
@@ -803,8 +821,37 @@ def _chip_cls(regime):
     }.get(regime, "unknown")
 
 
+def _overall_advice(market_state, us_state=None, big_state=None):
+    """把台股／美股／大資金三顆燈合成一句操作建議。回 (文字, css class)。"""
+    tw_r = market_state.get("regime") if market_state else None
+    if tw_r in (None, "unknown"):
+        return "掃描後依台股／美股／大資金三項給出操作指引", "unknown"
+    us_r = us_state.get("regime") if us_state else None
+    bf = big_state.get("position_factor", 1.0) if big_state else 1.0
+
+    # 動能策略鐵律：台股空頭一律暫停（不放空個股）
+    if tw_r == "bear":
+        return "🔴 大盤空頭 — 暫停進場，優先保護持股、嚴設停損", "bear"
+
+    warns = []
+    if us_r in ("bear", "risk_off"):
+        warns.append("美股轉弱")
+    if bf <= 0.5:
+        warns.append("大資金偏空")
+    if tw_r == "neutral":
+        warns.append("台股中性")
+
+    if tw_r == "bull" and not warns:
+        return "🟢 環境偏多 — 可正常／積極進場，照訊號操作、讓利潤奔跑", "bull"
+    if len(warns) >= 2:
+        return ("🟠 多重警訊（" + "、".join(warns)
+                + "）— 大幅減碼，只做最強勢、嚴設停損", "bear")
+    return ("🟡 環境分歧（" + "、".join(warns)
+            + "）— 減碼謹慎，提高選股門檻、縮小部位", "neutral")
+
+
 def render_header(market_state, last_scan_at=None, us_state=None):
-    """整合的 header：左側標題，右側大盤雙 chip + 日期/上次掃描"""
+    """整合的 header：左側標題，右側大盤三 chip + 綜合判斷建議 + 日期/上次掃描"""
     date_str = now_tw().strftime('%Y / %m / %d  %A')
     chips = []
 
@@ -845,6 +892,12 @@ def render_header(market_state, last_scan_at=None, us_state=None):
     status_html = "<div class='hdr-chips'>" + "".join(chips) + "</div>" if chips else ""
     last = f"<span class='sep'>·</span>上次掃描 {last_scan_at}" if last_scan_at else ""
 
+    adv_text, adv_cls = _overall_advice(market_state, us_state, big_state)
+    advice_html = (
+        f"<div class='hdr-advice {adv_cls}'><span class='dot'></span>"
+        f"<b>判斷建議</b>　{adv_text}</div>"
+    )
+
     st.markdown(
         f"""
 <div class='app-header'>
@@ -857,6 +910,7 @@ def render_header(market_state, last_scan_at=None, us_state=None):
     <div class='app-date'>{date_str}{last}</div>
   </div>
 </div>
+{advice_html}
 """,
         unsafe_allow_html=True,
     )
