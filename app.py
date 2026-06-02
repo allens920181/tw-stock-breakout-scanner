@@ -469,47 +469,8 @@ if "watchlist" not in st.session_state:
 # Sidebar
 # =====================================================
 with st.sidebar:
-    st.markdown("### 風格 Preset")
-    preset_options = {
-        "conservative": base_cfg["presets"]["conservative"]["label"],
-        "balanced": base_cfg["presets"]["balanced"]["label"],
-        "aggressive": base_cfg["presets"]["aggressive"]["label"],
-    }
-    current_preset = st.session_state.get("preset", "balanced")
-    selected_preset = st.segmented_control(
-        "風格 Preset",
-        options=list(preset_options.keys()),
-        format_func=lambda k: preset_options[k],
-        default=current_preset,
-        label_visibility="collapsed",
-    )
-    if selected_preset and selected_preset != current_preset:
-        apply_preset(selected_preset)
-        st.rerun()
-
-    st.markdown("### 策略模式")
-    _mode_opts = {
-        "breakout": "強勢突破",
-        "early": "早期突破",
-        "ambush": "潛伏起漲前",
-    }
-    _mode_help = {
-        "breakout": "追強勢：突破創高＋量增＋法人買。買已在漲的（追動能）。",
-        "early": "只抓剛突破、未追高的：收緊延伸度＋拒絕非新鮮突破。",
-        "ambush": "起漲前埋伏：窄幅整理＋量縮＋站穩均線＋接近未突破＋法人吸籌。",
-    }
-    strategy_mode = st.segmented_control(
-        "策略模式",
-        options=list(_mode_opts.keys()),
-        format_func=lambda k: _mode_opts[k],
-        default=st.session_state.get("strategy_mode", "breakout"),
-        key="strategy_mode",
-        label_visibility="collapsed",
-    )
-    st.caption(_mode_help.get(strategy_mode or "breakout", ""))
-
-    st.markdown("### 資料來源")
-
+    # ① 資料來源（掃哪些股）
+    st.markdown("### ① 資料來源")
     source_options = {
         "upload": "上傳清單",
         "universe": "全台股",
@@ -554,8 +515,50 @@ with st.sidebar:
         )
         st.caption("首次 5–15 分鐘；同日重跑 < 1 分鐘")
 
+    # ② 策略模式（怎麼獵）— 最常切換
+    st.markdown("### ② 策略模式")
+    _mode_opts = {
+        "breakout": "強勢突破",
+        "early": "早期突破",
+        "ambush": "潛伏起漲前",
+    }
+    _mode_help = {
+        "breakout": "追強勢：突破創高＋量增＋法人買。買已在漲的（追動能）。",
+        "early": "只抓剛突破、未追高的：收緊延伸度＋拒絕非新鮮突破。",
+        "ambush": "起漲前埋伏：窄幅整理＋量縮＋站穩均線＋接近未突破＋法人吸籌。",
+    }
+    strategy_mode = st.segmented_control(
+        "策略模式",
+        options=list(_mode_opts.keys()),
+        format_func=lambda k: _mode_opts[k],
+        default=st.session_state.get("strategy_mode", "breakout"),
+        key="strategy_mode",
+        label_visibility="collapsed",
+    )
+    st.caption(_mode_help.get(strategy_mode or "breakout", ""))
+
+    # ③ 風格 Preset（多積極）— 門檻/風險微調
+    st.markdown("### ③ 風格（微調）")
+    preset_options = {
+        "conservative": base_cfg["presets"]["conservative"]["label"],
+        "balanced": base_cfg["presets"]["balanced"]["label"],
+        "aggressive": base_cfg["presets"]["aggressive"]["label"],
+    }
+    current_preset = st.session_state.get("preset", "balanced")
+    selected_preset = st.segmented_control(
+        "風格 Preset",
+        options=list(preset_options.keys()),
+        format_func=lambda k: preset_options[k],
+        default=current_preset,
+        label_visibility="collapsed",
+    )
+    st.caption("調整進場門檻嚴格度與單筆風險（保守=嚴、積極=寬）")
+    if selected_preset and selected_preset != current_preset:
+        apply_preset(selected_preset)
+        st.rerun()
+
     st.markdown("")
-    run_btn = st.button("開始掃描", type="primary", use_container_width=True)
+    run_btn = st.button("🔍 開始掃描", type="primary", use_container_width=True)
 
     st.divider()
 
