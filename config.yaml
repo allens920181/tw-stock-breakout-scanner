@@ -9,6 +9,21 @@ data:
   chunk_size: 50         # 批次下載每批檔數
   chunk_sleep: 1.0       # 批次間 sleep 秒數（避免 rate-limit）
 
+# 策略模式（買入掃描的選股邏輯）
+strategy:
+  mode: "breakout"   # breakout=強勢突破 / early=早期突破 / ambush=潛伏起漲前
+  early:
+    ext_threshold: 1.06        # 早期模式更嚴的延伸度（乖離 MA20 上限）
+    max_above_high20_pct: 3.0  # 突破點距 20 日高 ≤ 此% 才算「新鮮」，超過視為追高
+  ambush:
+    base_max_volatility: 0.05  # 近 20 日 std/mean ≤ 此值 = 窄幅整理
+    vol_contraction: 0.85      # 近 5 日均量 < 此倍×20 日均量 = 量縮（蓄勢）
+    near_high_pct: 8.0         # 距 20 日高 ≤ 此% 且未突破 = 接近邊緣
+    max_above_ma20_pct: 8.0    # 站穩 MA20 但乖離 ≤ 此%（不過熱）
+    enter_score: 6             # 潛伏總分(10) ≥ 此 → 進場(埋伏)
+    watch_score: 4
+    min_risk_pct: 0.03         # 窄箱停損下限（避免被噪音掃出）
+
 # 品質前置過濾（不符合直接歸類「不分析」）
 filters:
   min_price: 10              # 最低股價（過濾雞蛋水餃股）

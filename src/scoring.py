@@ -237,7 +237,12 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
             chase_warn = f"現價低於參考 {price_dev_pct:.1f}%"
 
     # ============ 延伸度（進場價相對 MA20 過熱）============
-    ext_threshold = filters.get("ext_threshold", 1.10)
+    strat = cfg.get("strategy", {})
+    mode = strat.get("mode", "breakout")
+    early_cfg = strat.get("early", {})
+    # 早期模式：收緊延伸度門檻
+    ext_threshold = (early_cfg.get("ext_threshold", 1.06)
+                     if mode == "early" else filters.get("ext_threshold", 1.10))
     ext_ratio = (entry_ref / ma20) if (entry_ref and ma20 > 0) else None
     ext_warn = None
     if ext_ratio is not None and ext_ratio >= ext_threshold:
@@ -245,6 +250,16 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
         if signal == "進場":
             signal = "觀察"
             status = "成功（過度延伸）"
+
+    # 早期模式：突破必須「新鮮」（剛突破，未漲一大段），否則視為追高降級
+    if mode == "early" and entry_info["entry_type"] == "breakout" and high_20:
+        above_high_pct = (entry_ref / high_20 - 1) * 100 if entry_ref else 0
+        max_fresh = early_cfg.get("max_above_high20_pct", 3.0)
+        if above_high_pct > max_fresh:
+            ext_warn = (ext_warn + " · " if ext_warn else "") + f"非新鮮突破(+{above_high_pct:.0f}%)"
+            if signal == "進場":
+                signal = "觀察"
+                status = "成功（非新鮮突破）"
 
     # ============ 籌碼面（三大法人 / 外資）確認與否決 ============
     chip_cfg = cfg.get("chips", {})

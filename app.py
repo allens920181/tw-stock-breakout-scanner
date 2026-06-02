@@ -445,6 +445,27 @@ with st.sidebar:
         apply_preset(selected_preset)
         st.rerun()
 
+    st.markdown("### 策略模式")
+    _mode_opts = {
+        "breakout": "強勢突破",
+        "early": "早期突破",
+        "ambush": "潛伏起漲前",
+    }
+    _mode_help = {
+        "breakout": "追強勢：突破創高＋量增＋法人買。買已在漲的（追動能）。",
+        "early": "只抓剛突破、未追高的：收緊延伸度＋拒絕非新鮮突破。",
+        "ambush": "起漲前埋伏：窄幅整理＋量縮＋站穩均線＋接近未突破＋法人吸籌。",
+    }
+    strategy_mode = st.segmented_control(
+        "策略模式",
+        options=list(_mode_opts.keys()),
+        format_func=lambda k: _mode_opts[k],
+        default=st.session_state.get("strategy_mode", "breakout"),
+        key="strategy_mode",
+        label_visibility="collapsed",
+    )
+    st.caption(_mode_help.get(strategy_mode or "breakout", ""))
+
     st.markdown("### 資料來源")
 
     source_options = {
@@ -646,6 +667,8 @@ def build_cfg():
         "lot_size": 1000,
         "max_position_pct": max_pos_pct,
     }
+    cfg.setdefault("strategy", {})
+    cfg["strategy"]["mode"] = st.session_state.get("strategy_mode", "breakout")
     base_costs = base_cfg.get("costs", {})
     cfg["costs"] = {
         "enabled": bool(st.session_state.get("cost_enabled", base_costs.get("enabled", True))),
@@ -739,7 +762,7 @@ def render_header(market_state, last_scan_at=None, us_state=None):
 
 def _action_class(action):
     s = str(action)
-    if "進場" in s:
+    if "進場" in s or "埋伏" in s:
         return "go"
     if "觀察" in s:
         return "watch"
@@ -1133,7 +1156,7 @@ def render_top_candidates(df, ohlc_map, n=10):
         return
 
     entry_mask = df["訊號判斷"] == "進場"
-    actionable_mask = df.get("操作建議", pd.Series(dtype=str)).astype(str).str.contains("進場", na=False)
+    actionable_mask = df.get("操作建議", pd.Series(dtype=str)).astype(str).str.contains("進場|埋伏", na=False)
     top = df[entry_mask & actionable_mask].head(n)
 
     skipped = int((entry_mask & ~actionable_mask).sum())
@@ -2450,6 +2473,17 @@ with tab5:
 
     st.info("**一句話流程**：大盤綠燈 → 掃描挑「進場＋法人買超＋RS強＋沒追高＋沒臨財報」"
             "→ 照卡片的進場/停損/目標/張數下單 → 持股管理每天看賣出建議 → 嚴守停損。")
+
+    with st.expander("⓪ 先選「策略模式」（側欄最上方）", expanded=True):
+        st.markdown(
+            "| 模式 | 抓什麼 | 適合 |\n"
+            "|---|---|---|\n"
+            "| **強勢突破** | 已突破創高＋量增＋法人買 | 追動能、買強勢（會買在已漲一段）|\n"
+            "| **早期突破** | 只抓「剛突破、沒追高」 | 想參與突破但不想追高 |\n"
+            "| **潛伏起漲前** | 窄幅整理＋量縮＋站穩均線＋接近未突破＋法人吸籌 | 想埋伏在發動前 |\n\n"
+            "潛伏模式的進場建議顯示為「**埋伏 · 潛伏**」，是買在整理區、停損放箱底，等突破。\n"
+            "三種模式的籌碼否決、部位管理、綜合評級都共用同一套。"
+        )
 
     with st.expander("① 買之前先看「大盤」（紅燈別買）", expanded=True):
         st.markdown(

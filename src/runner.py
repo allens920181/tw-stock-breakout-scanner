@@ -11,6 +11,7 @@ from .fetcher import (
     load_stock_list,
     resolve_markets_and_data,
 )
+from .ambush import analyze_ambush
 from .backtest import (
     backtest_symbol, summarize_by_regime, summarize_trades, summarize_trades_is_oos,
 )
@@ -134,13 +135,15 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
             market_state["position_factor"] = combined_factor
             market_state["us_state"] = us_state
 
-    emit("分析", 0.82, f"逐檔分析 {len(resolved)} 檔")
+    mode = cfg.get("strategy", {}).get("mode", "breakout")
+    analyze_fn = analyze_ambush if mode == "ambush" else analyze_stock
+    emit("分析", 0.82, f"逐檔分析 {len(resolved)} 檔（模式：{mode}）")
     results = []
     failed_list = []
     total = max(len(resolved), 1)
     for i, r in enumerate(resolved):
         try:
-            res = analyze_stock(
+            res = analyze_fn(
                 r["symbol"], r["company_name"], r["market"],
                 r["df"], shares_map.get(r["symbol"]), cfg,
                 market_state=market_state,
