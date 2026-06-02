@@ -476,7 +476,7 @@ with st.sidebar:
         "資料來源",
         options=list(source_options.keys()),
         format_func=lambda k: source_options[k],
-        default="upload",
+        default="universe",
         label_visibility="collapsed",
     )
 
