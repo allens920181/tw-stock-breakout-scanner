@@ -799,6 +799,20 @@ def render_header(market_state, last_scan_at=None, us_state=None):
             f"</div>"
         )
 
+    big_state = market_state.get("big_state") if market_state else None
+    if big_state:
+        _bf = big_state.get("position_factor", 1.0)
+        bcls = "bull" if _bf >= 1.0 else ("neutral" if _bf >= 0.75 else "bear")
+        blabel = big_state.get("label", "")
+        for sym in ["🟢", "🔴", "🟡", "⚪"]:
+            blabel = blabel.replace(sym, "")
+        chips.append(
+            f"<div class='hdr-status {bcls}' title='{big_state.get('detail','')}'>"
+            f"<span class='dot'></span>"
+            f"<b>大資金 {blabel.strip()}</b>"
+            f"</div>"
+        )
+
     status_html = "<div class='hdr-chips'>" + "".join(chips) + "</div>" if chips else ""
     last = f"<span class='sep'>·</span>上次掃描 {last_scan_at}" if last_scan_at else ""
 

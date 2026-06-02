@@ -154,8 +154,9 @@ def _unknown():
     }
 
 
-def merge_position_factor(tw_state, us_state):
-    """min 取較保守者：任一警訊就減倉"""
+def merge_position_factor(tw_state, us_state, big_state=None):
+    """min 取較保守者：任一警訊就減倉（台股 regime × 美股風險 × 大資金）"""
     tw_f = tw_state.get("position_factor", 1.0) if tw_state else 1.0
     us_f = us_state.get("position_factor", 1.0) if us_state else 1.0
-    return min(tw_f, us_f)
+    big_f = big_state.get("position_factor", 1.0) if big_state else 1.0
+    return min(tw_f, us_f, big_f)

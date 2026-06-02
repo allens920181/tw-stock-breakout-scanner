@@ -99,6 +99,12 @@ market_filter:
   enabled: true
   symbol: "^TWII"
 
+# 大資金 / 宏觀資金面（只調部位，不選股）
+bigmoney:
+  enabled: true
+  verify_ssl: true
+  weights: {fut: 0.5, twd: 0.3, margin: 0.2}  # 外資台指期 / 台幣匯率 / 大盤融資 子分權重
+
 # 籌碼面（三大法人 / 外資買賣超，官方免費 API、免 key）
 chips:
   enabled: true          # 關閉則不抓籌碼、不影響其他評分

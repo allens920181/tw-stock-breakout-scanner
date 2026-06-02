@@ -178,11 +178,33 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
             emit("大盤判斷", 0.81,
                  f"美股 {us_state['label']} — {us_state['detail']}")
 
-            # 合併雙因子：取較保守者
-            combined_factor = merge_position_factor(market_state, us_state)
+            # 大資金 / 宏觀資金面（外資台指期 / 台幣 / 大盤融資）
+            big_state = None
+            bm_cfg = cfg.get("bigmoney", {})
+            if bm_cfg.get("enabled", True):
+                emit("大盤判斷", 0.81, "抓大資金（外資台指期/台幣/大盤融資）")
+                try:
+                    from datetime import datetime, timedelta
+                    from .bigmoney import classify_bigmoney
+                    today = datetime.now().date()
+                    mdates = [(today - timedelta(days=k)).strftime("%Y%m%d")
+                              for k in range(0, 9)]
+                    big_state = classify_bigmoney(
+                        cache_dir=cfg["data"]["cache_dir"],
+                        verify=bm_cfg.get("verify_ssl", True),
+                        margin_dates=mdates, weights=bm_cfg.get("weights"),
+                    )
+                    emit("大盤判斷", 0.815,
+                         f"大資金 {big_state['label']} — {big_state['detail']}")
+                except Exception as e:
+                    log.warning("大資金判斷失敗，略過：%s", e)
+
+            # 合併三因子：取較保守者
+            combined_factor = merge_position_factor(market_state, us_state, big_state)
             if market_state:
                 market_state["position_factor"] = combined_factor
                 market_state["us_state"] = us_state
+                market_state["big_state"] = big_state
 
     # 隨大盤切門檻（建議模式套用後）：依當前 regime 覆寫進場門檻 enter
     rg_thr = cfg.get("scoring", {}).get("regime_thresholds")
