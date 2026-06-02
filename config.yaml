@@ -26,6 +26,8 @@ strategy:
     enter_score: 6             # 蓄勢品質分(10) ≥ 此 → 可進場
     watch_score: 4
     min_risk_pct: 0.03         # 窄箱停損下限（避免被噪音掃出）
+    require_positive_rs: true  # 相對強度 RS < min_rs（落後大盤的弱勢股）→ 進場降為觀察
+    min_rs: 0.0                # RS 門檻（%）；個股 60 日報酬須 ≥ 大盤 + 此值
 
 # 品質前置過濾（不符合直接歸類「不分析」）
 filters:
@@ -165,6 +167,7 @@ costs:
   fee_rate: 0.001425       # 單邊手續費率
   fee_discount: 1.0        # 券商折數（如 6 折 = 0.6）
   tax_rate: 0.003          # 賣出證交稅（現股 0.3%）
+  slippage_pct: 0.0015     # 單邊滑價（買貴/賣便宜各 0.15%）；小型股突破成交常偏離訊號價
   apply_to_factor_eval: false  # 因子驗證是否也扣成本（預設關，避免雙重口徑混淆）
 
 output:

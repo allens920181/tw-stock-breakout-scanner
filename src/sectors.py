@@ -64,6 +64,55 @@ def fetch_sectors(cache_dir, verify=True, use_cache=True):
     return out
 
 
+def _to_float(x):
+    try:
+        return float(str(x).replace(",", "").strip())
+    except Exception:
+        return None
+
+
+def fetch_shares_official(cache_dir, verify=True, use_cache=True):
+    """
+    回傳 { code(無後綴): 已發行普通股數 }，來源 TWSE 上市公司基本資料 t187ap03_L。
+    優先用「已發行普通股數或TDR原發行股數」欄位；缺值則用 實收資本額 / 每股面額 推估。
+    官方免費、免 key，且不被資料中心 IP 阻擋（解決雲端 Yahoo 股數抓不到 → 換手率空白）。
+    僅上市；查無者回傳不含該 code（交由 yfinance 補）。
+    """
+    if use_cache:
+        cached = cache_mod.load_obj(cache_dir, "shares_official")
+        if cached is not None:
+            return cached
+
+    out = {}
+    url = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+    try:
+        data = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT, verify=verify).json()
+    except Exception as e:
+        log.warning("TWSE 流通股數抓取失敗：%s", e)
+        return out
+
+    for row in data:
+        try:
+            code = str(row.get("公司代號", "")).strip()
+            if not code:
+                continue
+            shares = _to_float(row.get("已發行普通股數或TDR原發行股數"))
+            if not shares or shares <= 0:
+                cap = _to_float(row.get("實收資本額"))
+                par = _to_float(row.get("普通股每股面額")) or 10.0
+                if cap and par > 0:
+                    shares = cap / par
+            if shares and shares > 0:
+                out[code] = shares
+        except Exception:
+            continue
+
+    log.info("官方流通股數 %d 檔", len(out))
+    if out:
+        cache_mod.save_obj(cache_dir, "shares_official", out)
+    return out
+
+
 def annotate_group_strength(results, sectors_map):
     """
     跨檔後處理：為每筆結果加上「產業 / 族群強勢檔數 / 族群同步」。

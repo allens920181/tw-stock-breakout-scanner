@@ -24,12 +24,14 @@ def _slice_until(df, idx):
 
 
 def _cost_round_trip_rate(costs):
-    """回傳 (buy_rate, sell_rate)；sell_rate 含證交稅。costs=None/停用 → (0, 0)。"""
+    """回傳 (buy_rate, sell_rate)；sell_rate 含證交稅，買賣雙邊各含滑價。
+    costs=None/停用 → (0, 0)。"""
     if not costs or not costs.get("enabled", False):
         return 0.0, 0.0
     fee = costs.get("fee_rate", 0.001425) * costs.get("fee_discount", 1.0)
     tax = costs.get("tax_rate", 0.003)
-    return fee, fee + tax
+    slip = costs.get("slippage_pct", 0.0)   # 買貴 / 賣便宜各 slip
+    return fee + slip, fee + tax + slip
 
 
 def _apply_costs(entry, exit_price, risk, costs):

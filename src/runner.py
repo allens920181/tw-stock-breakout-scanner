@@ -19,7 +19,9 @@ from .chips import fetch_chips
 from .earnings import fetch_all_earnings
 from .factor_eval import evaluate_factors, suggest_weights_from_lift
 from .margin import fetch_margin
-from .sectors import annotate_group_strength, apply_sector_heat, fetch_sectors
+from .sectors import (
+    annotate_group_strength, apply_sector_heat, fetch_sectors, fetch_shares_official,
+)
 from .holdings import analyze_holding, load_holdings
 from .macro import classify_us_market, merge_position_factor
 from .market import classify_market
@@ -77,12 +79,29 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
         )
         emit("下載資料", 0.50, f"定位 {len(resolved)} 檔，{len(not_found)} 檔失敗")
 
-        emit("抓股數", 0.55, f"平行抓 {len(resolved)} 檔股數")
+        emit("抓股數", 0.55, f"取流通股數 {len(resolved)} 檔（TWSE 官方優先）")
         symbols = [r["symbol"] for r in resolved]
-        shares_map = fetch_all_shares(
-            symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
-        )
-        emit("抓股數", 0.76, "完成")
+        # 主來源：TWSE 官方流通股數（雲端不被擋，解決換手率空白）
+        official_shares = {}
+        try:
+            official_shares = fetch_shares_official(
+                cfg["data"]["cache_dir"],
+                verify=cfg.get("sectors", {}).get("verify_ssl", True),
+            )
+        except Exception as e:
+            log.warning("官方流通股數抓取失敗，改用 yfinance：%s", e)
+        # 備援：官方查無的（少數 ETF/特殊代號）才動用 yfinance
+        missing = [s for s in symbols if s.split(".")[0] not in official_shares]
+        yf_shares = {}
+        if missing:
+            yf_shares = fetch_all_shares(
+                missing, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
+            )
+        shares_map = {}
+        for s in symbols:
+            code = s.split(".")[0]
+            shares_map[s] = official_shares.get(code) or yf_shares.get(s)
+        emit("抓股數", 0.76, f"官方 {len(official_shares)} 檔 + yfinance 補 {len(missing)} 檔")
 
         emit("抓現價", 0.77, f"平行抓 {len(resolved)} 檔現價")
         price_map = fetch_all_current_prices(

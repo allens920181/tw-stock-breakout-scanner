@@ -165,6 +165,13 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         if past > 0:
             rs_diff = (close / past - 1) * 100 - market_state["ret_60d"]
 
+    # ===== 相對強度硬門檻：落後大盤的弱勢股不給進場（降為觀察）=====
+    # 潛伏起漲最大陷阱＝撈到「便宜但沒人要」的落後股；RS<門檻者啟動機率明顯偏低。
+    rs_downgrade = False
+    if amb.get("require_positive_rs", True) and rs_diff is not None:
+        if rs_diff < amb.get("min_rs", 0.0) and signal == "進場":
+            signal, rs_downgrade = "觀察", True
+
     # ===== 現價偏離 =====
     if current_price is not None and entry > 0:
         price_dev = (current_price - entry) / entry * 100
@@ -238,9 +245,16 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         if red:
             reason += "（注意：" + "、".join(red) + "）"
     elif signal == "觀察":
-        action = "觀察 · 待突破" if pending else "觀察"
         grade = "C"
-        reason = f"{launch_label}（{int(readiness)}）" if pending else "蓄勢未足"
+        if rs_downgrade:
+            action = "觀察 · 弱於大盤"
+            reason = f"RS{rs_diff:+.1f}% 落後大盤（蓄勢{int(readiness)}，待轉強）"
+        elif pending:
+            action = "觀察 · 待突破"
+            reason = f"{launch_label}（{int(readiness)}）"
+        else:
+            action = "觀察"
+            reason = "蓄勢未足"
     else:
         action, grade, reason = "不操作", "避開", "未達潛伏條件"
 
