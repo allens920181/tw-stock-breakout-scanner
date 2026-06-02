@@ -1066,6 +1066,68 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 # =====================================================
 # Tab 1: 買入掃描
 # =====================================================
+_GRADE_BADGE = {
+    "A": ("🟢", "#059669", "強力進場"),
+    "B": ("🟡", "#D97706", "可進場"),
+    "C": ("🟠", "#EA580C", "觀察"),
+    "避開": ("🔴", "#DC2626", "避開"),
+}
+
+
+def _pillar_lights(row):
+    """回傳 5 支柱燈號 list[(名稱, emoji)]：技術/籌碼/相對強度/族群/風險。"""
+    def dot(state):
+        return {"g": "🟢", "y": "🟡", "r": "🔴", "n": "⚪"}[state]
+
+    action = str(row.get("操作建議", ""))
+    tech = "g" if "進場" in action else ("y" if "觀察" in action else "r")
+
+    chip = str(row.get("籌碼確認", "—"))
+    chip_s = "g" if (chip.startswith("法人") and "賣" not in chip) else (
+        "r" if "賣超" in chip else "n")
+
+    rs = row.get("相對強度RS%", None)
+    rs_s = "n" if rs is None or pd.isna(rs) else ("g" if rs > 0 else "y")
+
+    grp = str(row.get("族群同步", "—"))
+    grp_s = "g" if "同步" in grp else "n"
+
+    warn = str(row.get("部位提示", "")) + str(row.get("評級理由", ""))
+    risk_s = "r" if any(k in warn for k in ("賣超", "追高", "乖離", "融資爆增", "財報")) else "g"
+
+    return [("技術", dot(tech)), ("籌碼", dot(chip_s)), ("RS", dot(rs_s)),
+            ("族群", dot(grp_s)), ("風險", dot(risk_s))]
+
+
+def _price_bar_html(stop, entry, cur, t1, t2):
+    """進場/停損/目標 視覺刻度條。"""
+    try:
+        vals = [float(stop), float(entry), float(t1), float(t2)]
+        lo, hi = min(vals), max(vals)
+        if hi <= lo:
+            return ""
+        def frac(x):
+            return max(0, min(100, (float(x) - lo) / (hi - lo) * 100))
+        marks = [(frac(stop), "#DC2626", "停損"), (frac(entry), "#2563EB", "進場"),
+                 (frac(t1), "#059669", "T1"), (frac(t2), "#047857", "T2")]
+        dots = ""
+        for f, c, lab in marks:
+            dots += (f"<div style='position:absolute;left:{f:.1f}%;top:-2px;transform:translateX(-50%);'>"
+                     f"<div style='width:9px;height:9px;border-radius:50%;background:{c};margin:0 auto;'></div>"
+                     f"<div style='font-size:9px;color:{c};white-space:nowrap;'>{lab}</div></div>")
+        cur_html = ""
+        if cur is not None and pd.notna(cur):
+            cf = frac(cur)
+            cur_html = (f"<div style='position:absolute;left:{cf:.1f}%;top:-14px;transform:translateX(-50%);"
+                        f"font-size:10px;'>▼<span style='font-size:9px;'>現價</span></div>")
+        return (f"<div style='position:relative;height:34px;margin:14px 4px 6px;'>"
+                f"<div style='position:absolute;top:2px;left:0;right:0;height:4px;border-radius:2px;"
+                f"background:linear-gradient(90deg,#FCA5A5,#FDE68A,#86EFAC);'></div>"
+                f"{cur_html}{dots}</div>")
+    except Exception:
+        return ""
+
+
 def render_top_candidates(df, ohlc_map, n=10):
     if "訊號判斷" not in df.columns:
         return
@@ -1130,6 +1192,31 @@ def render_top_candidates(df, ohlc_map, n=10):
                 if added:
                     st.toast("已加入待處理", icon="·")
                     st.rerun()
+
+            # ===== 綜合評級 + 一行理由 =====
+            grade = str(row.get("綜合評級", ""))
+            reason = str(row.get("評級理由", ""))
+            emoji, gcolor, glabel = _GRADE_BADGE.get(grade, ("", "#64748B", grade))
+            # 紅旗警示橫幅（理由含「注意：」）
+            if "注意：" in reason:
+                main_r, warn_r = reason.split("注意：", 1)
+                st.markdown(f"<div style='background:#FEF2F2;border-left:3px solid #DC2626;"
+                            f"padding:4px 8px;border-radius:4px;font-size:12px;color:#991B1B;margin-bottom:4px;'>"
+                            f"⚠️ {warn_r.rstrip('）')}</div>", unsafe_allow_html=True)
+                reason = main_r.rstrip("（")
+            lights = _pillar_lights(row)
+            lights_html = "　".join([f"{lab}{dot}" for lab, dot in lights])
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:10px;margin:2px 0 2px;'>"
+                f"<span style='font-size:15px;font-weight:700;color:{gcolor};'>{emoji} {grade}級 {glabel}</span>"
+                f"<span style='font-size:12px;color:#475569;'>{reason}</span>"
+                f"<span style='margin-left:auto;font-size:12px;'>{lights_html}</span>"
+                f"</div>", unsafe_allow_html=True)
+
+            # ===== 價格刻度條 =====
+            pbar = _price_bar_html(stop, entry, cur_price, t1, t2)
+            if pbar:
+                st.markdown(pbar, unsafe_allow_html=True)
 
             # ===== 資料列：7 個自訂 cell（含內嵌副資訊）=====
             try:
@@ -1266,7 +1353,7 @@ def render_results_table(df, key_prefix=""):
 
     # 精簡欄位（預設）
     minimal_cols = [
-        "股票", "公司名稱", "操作建議", "評分顯示",
+        "股票", "公司名稱", "綜合評級", "評級理由", "操作建議", "評分顯示",
         "目前現價", "進場參考價", "現價偏離%", "停損價", "目標價1(+1R半倉)",
         "風險%", "建議張數", "換手率%", "籌碼確認",
     ]
@@ -1310,6 +1397,9 @@ def render_results_table(df, key_prefix=""):
         col_cfg["進場成本"] = st.column_config.NumberColumn("進場成本", format="%d")
     if "操作建議" in display.columns:
         col_cfg["操作建議"] = st.column_config.TextColumn("操作建議", help=HELP["action"])
+    if "綜合評級" in display.columns:
+        col_cfg["綜合評級"] = st.column_config.TextColumn(
+            "綜合評級", help="A=強力進場 / B=可進場 / C=觀察 / 避開。綜合技術+籌碼+RS+風險的一眼結論。")
     if "評分顯示" in display.columns:
         col_cfg["評分顯示"] = st.column_config.TextColumn("評分顯示", help=HELP["score"])
     if "RR比" in display.columns:
@@ -1781,6 +1871,19 @@ with tab2:
         hold = h_df.drop(urgent.index) if len(urgent) else h_df
 
         st.divider()
+
+        # ===== 今天行動摘要（一眼看懂今天要做什麼）=====
+        qty_col = h_df.get("賣出量", pd.Series(dtype=str)).astype(str)
+        n_sell = int(qty_col.str.contains("全出").sum())
+        n_half = int(qty_col.str.contains("賣半").sum())
+        n_hold = int(qty_col.str.contains("保留").sum())
+        st.markdown(
+            f"<div style='font-size:14px;margin-bottom:6px;'>📋 <b>今天</b>："
+            f"<span style='color:#DC2626;font-weight:700;'>{n_sell} 檔要賣</span> · "
+            f"<span style='color:#D97706;font-weight:700;'>{n_half} 檔減半</span> · "
+            f"<span style='color:#059669;'>{n_hold} 檔續抱</span></div>",
+            unsafe_allow_html=True,
+        )
 
         # 優先顯示需要動作（紅色強調 banner）
         if len(urgent):

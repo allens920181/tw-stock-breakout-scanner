@@ -329,11 +329,46 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
     max_score_total = round(sum(weights.get(k, 0) for k in strengths))
     score_display = f"{score} / {max_score_total}"
 
+    # ============ 綜合評級（A / B / C / 避開）+ 一行理由 ============
+    red_flags = [w for w in (
+        (chip_warn if chip_confirm == "法人賣超" else None),
+        earn_warn, ext_warn,
+        (margin_warn if margin_flag == "融資爆增" else None),
+    ) if w]
+    chip_positive = chip_confirm.startswith("法人") and "賣" not in chip_confirm
+    if market_state and market_state["regime"] == "bear":
+        grade, reason = "避開", "大盤空頭"
+    elif signal == "進場" and pos["suggested_lots"] == 0:
+        grade, reason = "避開", "資金不足"
+    elif signal not in ("進場", "觀察"):
+        grade, reason = "避開", (red_flags[0] if red_flags else "未達訊號")
+    else:
+        pos_reasons = []
+        if entry_info["entry_type"] in ("breakout", "pullback", "base"):
+            pos_reasons.append(entry_info["entry_label"])
+        if chip_positive:
+            pos_reasons.append(chip_confirm)
+        if cond_rel_strength:
+            pos_reasons.append("RS強")
+        if cond_trend_confirm:
+            pos_reasons.append("趨勢確認")
+        if signal == "進場" and chip_positive and cond_rel_strength and not red_flags:
+            grade = "A"
+        elif signal == "進場":
+            grade = "B"
+        else:
+            grade = "C"
+        reason = "＋".join(pos_reasons[:3]) if pos_reasons else "訊號成立"
+        if red_flags:
+            reason = reason + "（注意：" + "、".join(red_flags) + "）"
+
     return {
         "股票": symbol, "公司名稱": company_name, "市場": market,
         "狀態": status, "訊號判斷": signal, "評分": score, "評分顯示": score_display,
 
         "操作建議": action,
+        "綜合評級": grade,
+        "評級理由": reason,
         "進場類型": entry_info["entry_label"],
         "進場條件": entry_info["entry_note"],
 

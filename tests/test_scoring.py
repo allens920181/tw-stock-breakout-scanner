@@ -128,3 +128,18 @@ def test_insufficient_data():
     })
     res = analyze_stock("0001.TW", "TEST", "TW", df, shares=1, cfg=CFG)
     assert res["狀態"] == "資料不足"
+
+
+def test_verdict_grade_present():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=CFG)
+    assert res["綜合評級"] in ("A", "B", "C", "避開")
+    assert isinstance(res["評級理由"], str) and len(res["評級理由"]) > 0
+
+
+def test_verdict_avoid_on_chip_sell():
+    df = _strong_uptrend_df()
+    res = analyze_stock("2330.TW", "台積電", "TW", df, shares=10_000_000_000, cfg=CFG,
+                        chips={"inst_net_lots": -8000, "foreign_net_lots": -5000})
+    # 法人賣超會把進場降觀察 → 不可能是 A 級
+    assert res["綜合評級"] != "A"
