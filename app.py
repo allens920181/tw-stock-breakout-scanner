@@ -27,7 +27,7 @@ from src.preferences import load_prefs, save_prefs
 from src.report import write_excel
 from src.runner import (
     run_adaptive_recommend, run_backtest, run_factor_eval, run_holdings_scan,
-    run_plateau, run_scan, run_sensitivity,
+    run_plateau, run_scan, run_sensitivity, run_stress_test,
 )
 from src.universe import fetch_twse_universe
 
@@ -351,8 +351,23 @@ if "_prefs_loaded" not in st.session_state:
     prefs = load_prefs()
     st.session_state["_prefs"] = prefs
     st.session_state["_prefs_loaded"] = True
+    # 跨重啟保留「上次校準日期」以維持頻率提醒
+    if prefs.get("last_calibrated_date") and "last_calibrated_date" not in st.session_state:
+        st.session_state["last_calibrated_date"] = prefs["last_calibrated_date"]
 else:
     prefs = st.session_state["_prefs"]
+
+
+def _persist_calibration_date():
+    """記錄並持久化本次校準日期（給頻率提醒用）。"""
+    d = datetime.now().date().isoformat()
+    st.session_state["last_calibrated_date"] = d
+    try:
+        _p = load_prefs()
+        _p["last_calibrated_date"] = d
+        save_prefs(_p)
+    except Exception:
+        pass
 
 
 def fmt_int(n):
@@ -1432,12 +1447,13 @@ def render_results_table(df, key_prefix=""):
         "股票", "公司名稱", "綜合評級", "啟動標籤", "啟動就緒度", "評級理由",
         "操作建議", "評分顯示",
         "目前現價", "進場參考價", "現價偏離%", "停損價", "目標價1(+1R半倉)",
-        "風險%", "建議張數", "換手率%", "籌碼確認", "相對強度RS%",
+        "風險%", "建議張數", "換手率%", "籌碼確認", "營收動能", "相對強度RS%",
     ]
     full_priority = minimal_cols + [
         "進場類型", "進場條件", "進場成本", "佔資金%", "部位提示",
         "法人連買天數", "法人買賣超(張)", "外資買賣超(張)", "法人5日累計(張)",
         "融資券提示", "融資增減%", "券資比%",
+        "月營收YoY%", "月營收MoM%", "營收月份",
         "財報日", "距財報日",
         "產業", "族群同步", "族群強勢檔數",
         "相對強度RS%", "趨勢確認", "ADX", "乖離MA20%", "大盤確認(FTD)",
@@ -1658,6 +1674,17 @@ with tab1:
                         f"⚠ 目前 {_n} 檔較多，校準需跑多輪全清單回測，可能要**數分鐘**。"
                         "建議先用較精簡的清單，或縮短回測天數。"
                     )
+                _lc = st.session_state.get("last_calibrated_date")
+                if _lc:
+                    try:
+                        _d = (datetime.now().date() - datetime.fromisoformat(_lc).date()).days
+                        if _d < 20:
+                            st.warning(f"🕒 上次校準 {_d} 天前。建議每月一次即可，"
+                                       "太頻繁會慢性過擬合（OOS 失去意義）。")
+                        else:
+                            st.caption(f"🕒 上次校準 {_d} 天前。")
+                    except Exception:
+                        pass
                 oc1, oc2 = st.columns([2, 1])
                 ac_lookback = oc1.slider("校準回測天數", 60, 250,
                                          int(st.session_state.get("ac_lookback", 120)),
@@ -1700,6 +1727,7 @@ with tab1:
                             st.session_state["regime_thresholds"] = ap["regime_thresholds"]
                         st.session_state["adapt_result"] = ar
                         st.session_state["autocal_plan"] = plan
+                        _persist_calibration_date()
                         # 用套用後的 cfg 立即重掃（免重抓）
                         bar_o.progress(0.85, text="套用建議後重掃 …")
                         cfg2 = build_cfg()
@@ -2402,6 +2430,55 @@ with tab3:
                 st.plotly_chart(fig_s, use_container_width=True,
                                  config={"displayModeBar": False})
 
+            # ===== 壓力情境回測（滑價 ×N）=====
+            st.divider()
+            st.markdown("### 🌪 壓力情境回測（滑價 ×N）")
+            st.caption(
+                "平常滑價是「常態假設」；但小型股**跳空/漲停打開**時可能滑 1~3%。"
+                "把滑價放大重跑，看 edge 在**最壞成交**下是否還活著——存活才敢放大部位。"
+            )
+            sc1, sc2 = st.columns([2, 1])
+            stress_mult = sc1.select_slider(
+                "滑價放大倍數", options=[2, 3, 5, 8],
+                value=int(st.session_state.get("stress_mult", 3)), key="stress_mult",
+            )
+            if sc2.button("跑壓力測試", key="stress_btn", use_container_width=True):
+                resolved = bt.get("resolved")
+                if not resolved:
+                    st.error("缺少回測資料 — 請重跑回測")
+                else:
+                    cfg = build_cfg()
+                    with st.spinner(f"滑價 ×{stress_mult} 重跑回測 …"):
+                        try:
+                            st.session_state["stress_result"] = run_stress_test(
+                                resolved, cfg, mult=float(stress_mult),
+                                lookback_days=int(bt_lookback), hold_days=int(bt_hold),
+                            )
+                        except Exception as e:
+                            st.error(f"壓力測試失敗：{e}")
+            if "stress_result" in st.session_state:
+                sr = st.session_state["stress_result"]
+                b, ss = sr["base"], sr["stress"]
+
+                def _g(d, k):
+                    return d.get(k)
+                srows = [
+                    {"指標": "期望值R", "常態": _g(b, "期望值R"), f"壓力×{int(sr['mult'])}": _g(ss, "期望值R")},
+                    {"指標": "勝率%", "常態": _g(b, "勝率%"), f"壓力×{int(sr['mult'])}": _g(ss, "勝率%")},
+                    {"指標": "平均R", "常態": _g(b, "平均R"), f"壓力×{int(sr['mult'])}": _g(ss, "平均R")},
+                    {"指標": "最大回撤R", "常態": _g(b, "最大回撤R"), f"壓力×{int(sr['mult'])}": _g(ss, "最大回撤R")},
+                ]
+                st.dataframe(pd.DataFrame(srows), use_container_width=True, hide_index=True)
+                be, se = _g(b, "期望值R") or 0, _g(ss, "期望值R") or 0
+                st.caption(f"滑價 {sr['base_slippage_pct']*100:.2f}% → {sr['stress_slippage_pct']*100:.2f}%")
+                if se > 0:
+                    st.success(f"✅ 最壞成交下期望值仍為正（{se:.3f}R）— edge 穩健，可正常部位。")
+                elif be > 0:
+                    st.warning(f"⚠ 期望值由正（{be:.3f}R）轉為 {se:.3f}R — edge 對成本敏感，"
+                               "宜降部位/只做高流動性標的。")
+                else:
+                    st.error("❌ 常態與壓力下期望值皆非正 — 此設定無穩健 edge，勿放大部位。")
+
             # ===== 自動校準（建議模式）=====
             st.divider()
             st.markdown("### 🎯 自動校準（建議模式）")
@@ -2410,6 +2487,19 @@ with tab3:
                 "取「參數高原中心」非最高峰、避免過擬合；每項附 **OOS 同向檢核**——"
                 "樣本內決定、樣本外驗證，✅ 才建議套用。"
             )
+            _lastcal = st.session_state.get("last_calibrated_date")
+            if _lastcal:
+                try:
+                    _days = (datetime.now().date()
+                             - datetime.fromisoformat(_lastcal).date()).days
+                    if _days < 20:
+                        st.warning(
+                            f"🕒 上次校準在 {_days} 天前。**建議每月校準一次即可**——"
+                            "校準太頻繁、反覆用同一段歷史挑參數，OOS 會被你看到失效（慢性過擬合）。")
+                    else:
+                        st.caption(f"🕒 上次校準 {_days} 天前（建議每月一次）。")
+                except Exception:
+                    pass
             ac1, ac2 = st.columns([2, 1])
             ac_targets = ac1.multiselect(
                 "校準對象",
@@ -2444,6 +2534,7 @@ with tab3:
                             hold_days=int(bt_hold), targets=tuple(ac_targets),
                             fe_result=fe_cached, progress_cb=_ac_cb,
                         )
+                        _persist_calibration_date()
                     except Exception as e:
                         st.error(f"自動校準失敗：{e}")
                     bar_a.progress(1.0, text="完成")
@@ -2851,7 +2942,7 @@ with tab5:
             "| **潛伏起漲前** | **啟動就緒度 ⚡** ＋ 是否「進場·突破確認」＋ 籌碼吸籌 | 配角（潛伏抓落後股，RS 多半負是正常）|\n"
             "| **早期 / 強勢突破** | **綜合評級 ＋ RS** ＋ 籌碼 | **主角（要正、越高越好）** |\n\n"
             "**潛伏模式判讀順序**：啟動就緒度(⚡已啟動/即將啟動≥70) → 操作建議是「進場·突破確認」(可買) 還是「觀察·待突破」(還沒發動) → 籌碼確認(法人連買) → 最後參考 RS。\n\n"
-            "**突破模式判讀順序**：綜合評級(A/B) → RS 正且高 → 籌碼確認 → 沒紅旗(法人賣超/融資爆增/財報臨近)。"
+            "**突破模式判讀順序**：綜合評級(A/B) → RS 正且高 → 籌碼確認 → 營收動能(年增=有基本面背書) → 沒紅旗(法人賣超/融資爆增/財報臨近/營收大減)。"
         )
 
     with st.expander("Ⓑ RS 相對強度怎麼看", expanded=False):

@@ -29,7 +29,7 @@ def _empty(symbol, name, market, status):
 
 def analyze_ambush(symbol, company_name, market, df, shares, cfg,
                    market_state=None, current_price=None, chips=None,
-                   margin=None, earnings_date=None):
+                   margin=None, earnings_date=None, revenue=None):
     filters = cfg["filters"]
     amb = cfg.get("strategy", {}).get("ambush", {})
 
@@ -209,6 +209,13 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         if earn_cfg.get("blackout_downgrade", True) and signal == "進場":
             signal = "觀察"
 
+    # ===== 月營收動能（基本面催化劑）=====
+    from .revenue import classify_revenue
+    rev_confirm, rev_warn, rev_strong, rev_weak = classify_revenue(
+        revenue, cfg.get("revenue", {}))
+    if rev_weak and cfg.get("revenue", {}).get("downgrade_on_weak", True) and signal == "進場":
+        signal = "觀察"
+
     # ===== 部位 =====
     ps = cfg.get("position_sizing", {})
     position_factor = market_state["position_factor"] if market_state else 1.0
@@ -228,7 +235,7 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         action, grade, reason = "資金不足", "避開", "資金不足"
     elif signal == "進場":
         action = "進場 · 突破確認" if broke else "埋伏 · 潛伏"
-        red = [w for w in (chip_warn, margin_warn, earn_warn) if w]
+        red = [w for w in (chip_warn, margin_warn, earn_warn, rev_warn) if w]
         pos_r = []
         if broke:
             pos_r.append("帶量突破")
@@ -240,6 +247,8 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
             pos_r.append(chip_confirm)
         elif cond_accum:
             pos_r.append("法人買超")
+        if rev_strong:
+            pos_r.append(rev_confirm)
         grade = "A" if ((broke or readiness >= 70) and strong_accum and not red) else "B"
         reason = "＋".join(pos_r[:3]) if pos_r else "蓄勢"
         if red:
@@ -258,7 +267,7 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
     else:
         action, grade, reason = "不操作", "避開", "未達潛伏條件"
 
-    warns = " · ".join([w for w in (pos["warning"], chip_warn, margin_warn, earn_warn) if w])
+    warns = " · ".join([w for w in (pos["warning"], chip_warn, margin_warn, earn_warn, rev_warn) if w])
 
     return {
         "股票": symbol, "公司名稱": company_name, "市場": market,
@@ -292,6 +301,10 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
         "券資比%": short_ratio,
         "財報日": earnings_date,
         "距財報日": d2e,
+        "營收動能": rev_confirm,
+        "月營收YoY%": round(revenue["yoy_pct"], 1) if (revenue and revenue.get("yoy_pct") is not None) else None,
+        "月營收MoM%": round(revenue["mom_pct"], 1) if (revenue and revenue.get("mom_pct") is not None) else None,
+        "營收月份": revenue.get("month") if revenue else None,
         "相對強度RS%": round(rs_diff, 2) if rs_diff is not None else None,
         "ATR14": round(atr, 2) if atr is not None else None,
         "20日高點": round(high_20, 2),

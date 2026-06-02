@@ -19,6 +19,7 @@ from .chips import fetch_chips
 from .earnings import fetch_all_earnings
 from .factor_eval import evaluate_factors, suggest_weights_from_lift
 from .margin import fetch_margin
+from .revenue import fetch_revenue
 from .sectors import (
     annotate_group_strength, apply_sector_heat, fetch_sectors, fetch_shares_official,
 )
@@ -63,6 +64,7 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
         chips_map = cached["chips_map"]
         margin_map = cached["margin_map"]
         earnings_map = cached["earnings_map"]
+        revenue_map = cached.get("revenue_map", {})
         market_state = cached["market_state"]
         symbols = [r["symbol"] for r in resolved]
     else:
@@ -148,6 +150,18 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
             except Exception as e:
                 log.warning("財報日抓取失敗，略過：%s", e)
 
+        revenue_map = {}
+        rev_cfg = cfg.get("revenue", {})
+        if rev_cfg.get("enabled", True):
+            emit("抓營收", 0.798, "抓月營收年增/月增")
+            try:
+                revenue_map = fetch_revenue(
+                    cfg["data"]["cache_dir"], verify=rev_cfg.get("verify_ssl", True),
+                )
+                emit("抓營收", 0.799, f"月營收 {len(revenue_map)} 檔")
+            except Exception as e:
+                log.warning("月營收抓取失敗，略過：%s", e)
+
         market_state = None
         us_state = None
         if cfg.get("market_filter", {}).get("enabled", True):
@@ -194,6 +208,7 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
                 chips=chips_map.get(r["symbol"].split(".")[0]),
                 margin=margin_map.get(r["symbol"].split(".")[0]),
                 earnings_date=earnings_map.get(r["symbol"]),
+                revenue=revenue_map.get(r["symbol"].split(".")[0]),
             )
             results.append(res)
         except Exception as e:
@@ -255,6 +270,7 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
             "chips_map": chips_map,
             "margin_map": margin_map,
             "earnings_map": earnings_map,
+            "revenue_map": revenue_map,
             "market_state": market_state,
         },
     }
@@ -469,6 +485,44 @@ def run_weight_suggest(cfg, fe_result=None, resolved=None,
         eps=lw.get("eps", 0.02),
         preserve_unverifiable=lw.get("preserve_unverifiable", ["turnover_strong"]),
     )
+
+
+def run_stress_test(resolved, cfg, mult=3.0, lookback_days=120, hold_days=10,
+                    min_score=None):
+    """
+    壓力情境回測：把滑價放大 mult 倍重跑，回傳 base vs stress 摘要對比。
+    模擬跳空/漲停打開等惡劣成交，檢查 edge 在最壞情況下是否仍存活。
+    """
+    import copy as _copy
+
+    weights = cfg["scoring"]["weights"]
+    if min_score is None:
+        min_score = cfg["scoring"]["thresholds"].get("enter", 7)
+
+    def _run(costs):
+        trades = []
+        for r in resolved:
+            try:
+                trades.extend(backtest_symbol(
+                    r["df"], weights, min_score,
+                    hold_days=hold_days, lookback=lookback_days, costs=costs,
+                ))
+            except Exception:
+                pass
+        return summarize_trades(trades, cfg)
+
+    base_costs = cfg.get("costs", {})
+    base = _run(base_costs)
+    stress_costs = _copy.deepcopy(base_costs)
+    stress_costs["enabled"] = True
+    stress_costs["slippage_pct"] = base_costs.get("slippage_pct", 0.0015) * mult
+    stress = _run(stress_costs)
+    return {
+        "mult": mult,
+        "base_slippage_pct": base_costs.get("slippage_pct", 0.0015),
+        "stress_slippage_pct": stress_costs["slippage_pct"],
+        "base": base, "stress": stress,
+    }
 
 
 def run_adaptive_recommend(resolved, cfg, lookback_days=120, hold_days=10,

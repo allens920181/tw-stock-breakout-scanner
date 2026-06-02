@@ -39,7 +39,7 @@ def _empty_result(symbol, name, market, status):
 
 def analyze_stock(symbol, company_name, market, df, shares, cfg,
                   market_state=None, current_price=None, chips=None, margin=None,
-                  earnings_date=None):
+                  earnings_date=None, revenue=None):
     """
     依 config 進行品質過濾 + 加權評分。
     回傳 dict（一筆結果）。
@@ -322,8 +322,16 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
             signal = "觀察"
             status = "成功（財報避雷）"
 
+    # ============ 月營收動能（基本面催化劑）============
+    from .revenue import classify_revenue
+    rev_cfg = cfg.get("revenue", {})
+    rev_confirm, rev_warn, rev_strong, rev_weak = classify_revenue(revenue, rev_cfg)
+    if rev_weak and rev_cfg.get("downgrade_on_weak", True) and signal == "進場":
+        signal = "觀察"
+        status = "成功（營收衰退）"
+
     extra_warns = " · ".join(
-        [w for w in (chase_warn, ext_warn, chip_warn, margin_warn, earn_warn) if w]
+        [w for w in (chase_warn, ext_warn, chip_warn, margin_warn, earn_warn, rev_warn) if w]
     )
 
     # ============ 綜合操作建議（簡短）============
@@ -347,7 +355,7 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
     # ============ 綜合評級（A / B / C / 避開）+ 一行理由 ============
     red_flags = [w for w in (
         (chip_warn if chip_confirm == "法人賣超" else None),
-        earn_warn, ext_warn,
+        earn_warn, ext_warn, rev_warn,
         (margin_warn if margin_flag == "融資爆增" else None),
     ) if w]
     chip_positive = chip_confirm.startswith("法人") and "賣" not in chip_confirm
@@ -365,9 +373,13 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
             pos_reasons.append(chip_confirm)
         if cond_rel_strength:
             pos_reasons.append("RS強")
+        if rev_strong:
+            pos_reasons.append(rev_confirm)
         if cond_trend_confirm:
             pos_reasons.append("趨勢確認")
-        if signal == "進場" and chip_positive and cond_rel_strength and not red_flags:
+        rev_known = bool(revenue and revenue.get("yoy_pct") is not None)
+        if (signal == "進場" and chip_positive and cond_rel_strength
+                and (rev_strong or not rev_known) and not red_flags):
             grade = "A"
         elif signal == "進場":
             grade = "B"
@@ -415,6 +427,11 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
         "券資比%": short_ratio,
         "財報日": earnings_date,
         "距財報日": d2e,
+
+        "營收動能": rev_confirm,
+        "月營收YoY%": round(revenue["yoy_pct"], 1) if (revenue and revenue.get("yoy_pct") is not None) else None,
+        "月營收MoM%": round(revenue["mom_pct"], 1) if (revenue and revenue.get("mom_pct") is not None) else None,
+        "營收月份": revenue.get("month") if revenue else None,
 
         "ATR14": round(atr_v, 2) if atr_v is not None else None,
         "相對強度RS%": round(rs_diff, 2) if rs_diff is not None else None,

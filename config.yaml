@@ -122,6 +122,14 @@ sectors:
   heat_max: 3          # 同產業進場檔數上限；超過則每檔按 上限/檔數 比例降碼
   # 產業別來源：TWSE 上市公司基本資料
 
+# 月營收動能（基本面催化劑：技術強是否有營收背書）
+revenue:
+  enabled: true
+  verify_ssl: true
+  yoy_strong: 10.0         # 月營收年增 ≥ 此% → 視為基本面背書（評級加分）
+  yoy_weak: -20.0          # 月營收年減 ≤ 此%（負值）→ 純技術噴出反指標
+  downgrade_on_weak: true  # 進場訊號但營收大幅衰退 → 降為觀察（避免追無基本面的噴出）
+
 # 財報避雷（財報前後波動風險高，避免進場）
 earnings:
   enabled: true
