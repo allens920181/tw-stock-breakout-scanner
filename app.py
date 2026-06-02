@@ -1553,6 +1553,7 @@ with tab1:
                     progress_cb=on_progress, items=items,
                 )
             st.session_state["result"] = result
+            st.session_state["scan_cache"] = result.get("scan_cache")
             st.session_state["cfg"] = cfg
             st.session_state["last_scan_at"] = datetime.now().strftime("%H:%M:%S")
             try:
@@ -1580,6 +1581,25 @@ with tab1:
         summary = result["summary"]
         failed_df = result["failed_df"]
         ohlc_map = result.get("ohlc_map", {})
+
+        # ===== 換風格/模式後免重抓、即時重新評估 =====
+        if st.session_state.get("scan_cache"):
+            rc1, rc2 = st.columns([3, 1.4])
+            rc1.caption(f"目前資料：{st.session_state.get('last_scan_at', '')} 抓取。"
+                        f"換「風格 Preset / 策略模式」後，可不重抓直接重評估。")
+            if rc2.button("⚡ 套用設定重評估（免重抓）", use_container_width=True):
+                cfg = build_cfg()
+                try:
+                    with st.spinner("用現有資料重新分析 …"):
+                        new_result = run_scan(cfg=cfg, cached=st.session_state["scan_cache"])
+                    # 保留快取（重評估不改原始資料）
+                    new_result["scan_cache"] = st.session_state["scan_cache"]
+                    st.session_state["result"] = new_result
+                    st.session_state["cfg"] = cfg
+                    st.toast("已用現有資料重新評估", icon="⚡")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"重評估失敗：{e}")
 
         # 精簡 KPI（4 個）
         s = summary.iloc[0]

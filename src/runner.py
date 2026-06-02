@@ -30,12 +30,14 @@ from .sensitivity import detect_plateau, plateau_scan, sensitivity_scan
 log = logging.getLogger(__name__)
 
 
-def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
+def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=None):
     """
     progress_cb(stage: str, pct: float, message: str) — 可選回呼
     items: 可選；直接傳入 [{code, company_name}] 跳過 Excel 讀取
+    cached: 可選；傳入先前掃描的資料（resolved/各 map/market_state）→ 跳過所有下載，
+            只重跑分析（換風格 Preset / 策略模式時即時重評估，免重抓）
 
-    Returns: dict 含 df / summary / failed_df / elapsed_sec
+    Returns: dict 含 df / summary / failed_df / elapsed_sec / 以及可快取的原始資料
     """
     def emit(stage, pct, msg):
         log.info("[%s] %s", stage, msg)
@@ -48,92 +50,106 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
     t0 = time.time()
     cache_mod.ensure_dir(cfg["data"]["cache_dir"])
 
-    if items is None:
-        emit("讀取清單", 0.05, f"讀取 {input_path}")
-        items = load_stock_list(input_path, cfg["etf_fix_map"])
-    emit("讀取清單", 0.10, f"讀入 {len(items)} 檔")
+    if cached is not None:
+        # ===== 重評估模式：直接用快取資料，不下載 =====
+        emit("重新評估", 0.5, "用現有資料重新分析（免重抓）")
+        items = cached["items"]
+        resolved = cached["resolved"]
+        not_found = cached.get("not_found", [])
+        shares_map = cached["shares_map"]
+        price_map = cached["price_map"]
+        chips_map = cached["chips_map"]
+        margin_map = cached["margin_map"]
+        earnings_map = cached["earnings_map"]
+        market_state = cached["market_state"]
+        symbols = [r["symbol"] for r in resolved]
+    else:
+        if items is None:
+            emit("讀取清單", 0.05, f"讀取 {input_path}")
+            items = load_stock_list(input_path, cfg["etf_fix_map"])
+        emit("讀取清單", 0.10, f"讀入 {len(items)} 檔")
 
-    emit("下載資料", 0.15, "批次下載 OHLC ...")
-    resolved, not_found = resolve_markets_and_data(
-        items, cfg["data"]["period"], cfg["data"]["cache_dir"],
-        chunk_size=cfg["data"].get("chunk_size", 50),
-        chunk_sleep=cfg["data"].get("chunk_sleep", 1.0),
-    )
-    emit("下載資料", 0.50, f"定位 {len(resolved)} 檔，{len(not_found)} 檔失敗")
-
-    emit("抓股數", 0.55, f"平行抓 {len(resolved)} 檔股數")
-    symbols = [r["symbol"] for r in resolved]
-    shares_map = fetch_all_shares(
-        symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
-    )
-    emit("抓股數", 0.76, "完成")
-
-    emit("抓現價", 0.77, f"平行抓 {len(resolved)} 檔現價")
-    price_map = fetch_all_current_prices(
-        symbols, cfg["data"]["max_workers"],
-    )
-    emit("抓現價", 0.78, "完成")
-
-    chips_map = {}
-    chip_cfg = cfg.get("chips", {})
-    if chip_cfg.get("enabled", True):
-        emit("抓籌碼", 0.785, "抓三大法人 / 外資買賣超")
-        try:
-            chips_map = fetch_chips(
-                cfg["data"]["cache_dir"],
-                days=chip_cfg.get("streak_days", 5),
-                verify=chip_cfg.get("verify_ssl", True),
-            )
-            emit("抓籌碼", 0.79, f"籌碼 {len(chips_map)} 檔")
-        except Exception as e:
-            log.warning("籌碼抓取失敗，略過：%s", e)
-
-    margin_map = {}
-    mgn_cfg = cfg.get("margin", {})
-    if mgn_cfg.get("enabled", True):
-        emit("抓融資券", 0.792, "抓融資餘額 / 券資比")
-        try:
-            margin_map = fetch_margin(
-                cfg["data"]["cache_dir"],
-                verify=mgn_cfg.get("verify_ssl", True),
-            )
-            emit("抓融資券", 0.795, f"融資券 {len(margin_map)} 檔")
-        except Exception as e:
-            log.warning("融資券抓取失敗，略過：%s", e)
-
-    earnings_map = {}
-    earn_cfg = cfg.get("earnings", {})
-    if earn_cfg.get("enabled", True):
-        emit("抓財報日", 0.797, f"抓 {len(resolved)} 檔下一財報日")
-        try:
-            earnings_map = fetch_all_earnings(
-                symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
-            )
-            emit("抓財報日", 0.80, "完成")
-        except Exception as e:
-            log.warning("財報日抓取失敗，略過：%s", e)
-
-    market_state = None
-    us_state = None
-    if cfg.get("market_filter", {}).get("enabled", True):
-        emit("大盤判斷", 0.79, "抓 ^TWII 判斷台股大盤")
-        market_state = classify_market(
-            cfg["data"]["period"], cfg["data"]["cache_dir"],
+        emit("下載資料", 0.15, "批次下載 OHLC ...")
+        resolved, not_found = resolve_markets_and_data(
+            items, cfg["data"]["period"], cfg["data"]["cache_dir"],
+            chunk_size=cfg["data"].get("chunk_size", 50),
+            chunk_sleep=cfg["data"].get("chunk_sleep", 1.0),
         )
-        emit("大盤判斷", 0.80, f"台股 {market_state['label']} — {market_state['detail']}")
+        emit("下載資料", 0.50, f"定位 {len(resolved)} 檔，{len(not_found)} 檔失敗")
 
-        emit("大盤判斷", 0.80, "抓 ^VIX / ^GSPC 判斷美股風險偏好")
-        us_state = classify_us_market(
-            period="1y", cache_dir=cfg["data"]["cache_dir"],
+        emit("抓股數", 0.55, f"平行抓 {len(resolved)} 檔股數")
+        symbols = [r["symbol"] for r in resolved]
+        shares_map = fetch_all_shares(
+            symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
         )
-        emit("大盤判斷", 0.81,
-             f"美股 {us_state['label']} — {us_state['detail']}")
+        emit("抓股數", 0.76, "完成")
 
-        # 合併雙因子：取較保守者
-        combined_factor = merge_position_factor(market_state, us_state)
-        if market_state:
-            market_state["position_factor"] = combined_factor
-            market_state["us_state"] = us_state
+        emit("抓現價", 0.77, f"平行抓 {len(resolved)} 檔現價")
+        price_map = fetch_all_current_prices(
+            symbols, cfg["data"]["max_workers"],
+        )
+        emit("抓現價", 0.78, "完成")
+
+        chips_map = {}
+        chip_cfg = cfg.get("chips", {})
+        if chip_cfg.get("enabled", True):
+            emit("抓籌碼", 0.785, "抓三大法人 / 外資買賣超")
+            try:
+                chips_map = fetch_chips(
+                    cfg["data"]["cache_dir"],
+                    days=chip_cfg.get("streak_days", 5),
+                    verify=chip_cfg.get("verify_ssl", True),
+                )
+                emit("抓籌碼", 0.79, f"籌碼 {len(chips_map)} 檔")
+            except Exception as e:
+                log.warning("籌碼抓取失敗，略過：%s", e)
+
+        margin_map = {}
+        mgn_cfg = cfg.get("margin", {})
+        if mgn_cfg.get("enabled", True):
+            emit("抓融資券", 0.792, "抓融資餘額 / 券資比")
+            try:
+                margin_map = fetch_margin(
+                    cfg["data"]["cache_dir"],
+                    verify=mgn_cfg.get("verify_ssl", True),
+                )
+                emit("抓融資券", 0.795, f"融資券 {len(margin_map)} 檔")
+            except Exception as e:
+                log.warning("融資券抓取失敗，略過：%s", e)
+
+        earnings_map = {}
+        earn_cfg = cfg.get("earnings", {})
+        if earn_cfg.get("enabled", True):
+            emit("抓財報日", 0.797, f"抓 {len(resolved)} 檔下一財報日")
+            try:
+                earnings_map = fetch_all_earnings(
+                    symbols, cfg["data"]["cache_dir"], cfg["data"]["max_workers"],
+                )
+                emit("抓財報日", 0.80, "完成")
+            except Exception as e:
+                log.warning("財報日抓取失敗，略過：%s", e)
+
+        market_state = None
+        us_state = None
+        if cfg.get("market_filter", {}).get("enabled", True):
+            emit("大盤判斷", 0.79, "抓 ^TWII 判斷台股大盤")
+            market_state = classify_market(
+                cfg["data"]["period"], cfg["data"]["cache_dir"],
+            )
+            emit("大盤判斷", 0.80, f"台股 {market_state['label']} — {market_state['detail']}")
+
+            emit("大盤判斷", 0.80, "抓 ^VIX / ^GSPC 判斷美股風險偏好")
+            us_state = classify_us_market(
+                period="1y", cache_dir=cfg["data"]["cache_dir"],
+            )
+            emit("大盤判斷", 0.81,
+                 f"美股 {us_state['label']} — {us_state['detail']}")
+
+            # 合併雙因子：取較保守者
+            combined_factor = merge_position_factor(market_state, us_state)
+            if market_state:
+                market_state["position_factor"] = combined_factor
+                market_state["us_state"] = us_state
 
     mode = cfg.get("strategy", {}).get("mode", "breakout")
     analyze_fn = analyze_ambush if mode == "ambush" else analyze_stock
@@ -202,6 +218,18 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None):
         "elapsed_sec": elapsed,
         "market_state": market_state,
         "ohlc_map": ohlc_map,
+        # 可快取的原始資料：之後換風格/模式時傳回 cached= 即可免重抓
+        "scan_cache": {
+            "items": items,
+            "resolved": resolved,
+            "not_found": not_found,
+            "shares_map": shares_map,
+            "price_map": price_map,
+            "chips_map": chips_map,
+            "margin_map": margin_map,
+            "earnings_map": earnings_map,
+            "market_state": market_state,
+        },
     }
 
 
