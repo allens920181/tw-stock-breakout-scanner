@@ -9,6 +9,11 @@ from . import cache
 
 log = logging.getLogger(__name__)
 
+# 抑制 yfinance 在雲端 IP 被 Yahoo 擋（401 Invalid Crumb）的大量 ERROR 洗版
+# 抓不到股數/現價時掃描本就有容錯，不需把每筆失敗都印出來
+for _noisy in ("yfinance", "urllib3", "peewee"):
+    logging.getLogger(_noisy).setLevel(logging.CRITICAL)
+
 
 def fix_stock_code(code, etf_fix_map):
     if pd.isna(code):

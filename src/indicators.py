@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 
@@ -42,15 +43,16 @@ def _add_atr_adx(df, period=14):
 
     up_move = df["High"].diff()
     down_move = -df["Low"].diff()
-    plus_dm = ((up_move > down_move) & (up_move > 0)) * up_move.clip(lower=0)
-    minus_dm = ((down_move > up_move) & (down_move > 0)) * down_move.clip(lower=0)
+    plus_dm = (((up_move > down_move) & (up_move > 0)) * up_move.clip(lower=0)).astype(float)
+    minus_dm = (((down_move > up_move) & (down_move > 0)) * down_move.clip(lower=0)).astype(float)
 
-    atr_safe = atr.replace(0, pd.NA)
+    # 用 np.nan（保持 float64）避免 pd.NA 把欄位變成 object dtype → pandas 3.0 ewm 會崩
+    atr_safe = atr.replace(0, np.nan)
     plus_di = 100 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr_safe
     minus_di = 100 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr_safe
 
-    di_sum = (plus_di + minus_di).replace(0, pd.NA)
-    dx = 100 * (plus_di - minus_di).abs() / di_sum
+    di_sum = (plus_di + minus_di).replace(0, np.nan)
+    dx = (100 * (plus_di - minus_di).abs() / di_sum).astype(float)
     df["ADX14"] = dx.ewm(alpha=alpha, adjust=False).mean()
 
     return df
