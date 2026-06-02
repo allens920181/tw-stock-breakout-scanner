@@ -1645,6 +1645,82 @@ with tab1:
                 except Exception as e:
                     st.error(f"重評估失敗：{e}")
 
+            # ===== 一鍵：自動校準（依回測最佳參數）並重掃 =====
+            with st.expander("🚀 一鍵自動校準並重掃（依回測最佳參數）", expanded=False):
+                _res = st.session_state["scan_cache"].get("resolved", [])
+                _n = len(_res)
+                st.caption(
+                    f"用現有 {_n} 檔資料：跑回測網格 → 取參數高原中心/lift權重/各盤勢最佳門檻 → "
+                    f"**只自動套用 OOS 通過(✅) 的建議** → 立即重掃。免重抓、免逐步操作。"
+                )
+                if _n > 400:
+                    st.warning(
+                        f"⚠ 目前 {_n} 檔較多，校準需跑多輪全清單回測，可能要**數分鐘**。"
+                        "建議先用較精簡的清單，或縮短回測天數。"
+                    )
+                oc1, oc2 = st.columns([2, 1])
+                ac_lookback = oc1.slider("校準回測天數", 60, 250,
+                                         int(st.session_state.get("ac_lookback", 120)),
+                                         30, key="ac_lookback")
+                go_auto = oc2.button("🚀 一鍵校準並重掃",
+                                     type="primary", use_container_width=True)
+                if go_auto:
+                    from src.adaptive import pick_applicable
+                    cfg = build_cfg()
+                    bar_o = st.progress(0.0, text="自動校準中 …")
+
+                    def _oc_cb(p, msg):
+                        try:
+                            bar_o.progress(min(p * 0.8, 0.8), text=f"校準：{msg}")
+                        except Exception:
+                            pass
+                    try:
+                        ar = run_adaptive_recommend(
+                            _res, cfg, lookback_days=int(ac_lookback),
+                            hold_days=int(st.session_state.get("ac_hold", 10)),
+                            targets=("thresholds", "weights", "regime"),
+                            progress_cb=_oc_cb,
+                        )
+                        plan = pick_applicable(ar, require_oos=True)
+                        ap = plan["applied"]
+                        # 套用到 session（與手動面板同鍵）
+                        if "thr_enter" in ap:
+                            st.session_state["thr_enter"] = ap["thr_enter"]
+                        if "f_atr_mult" in ap:
+                            st.session_state["f_atr_mult"] = ap["f_atr_mult"]
+                        if "weights" in ap:
+                            _m = {"breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
+                                  "turnover_strong": "w_turnover", "kd": "w_kd",
+                                  "macd": "w_macd", "rel_strength": "w_rs",
+                                  "trend_confirm": "w_trend"}
+                            for sc_key, ss_key in _m.items():
+                                if sc_key in ap["weights"]:
+                                    st.session_state[ss_key] = ap["weights"][sc_key]
+                        if "regime_thresholds" in ap:
+                            st.session_state["regime_thresholds"] = ap["regime_thresholds"]
+                        st.session_state["adapt_result"] = ar
+                        st.session_state["autocal_plan"] = plan
+                        # 用套用後的 cfg 立即重掃（免重抓）
+                        bar_o.progress(0.85, text="套用建議後重掃 …")
+                        cfg2 = build_cfg()
+                        new_result = run_scan(cfg=cfg2, cached=st.session_state["scan_cache"])
+                        new_result["scan_cache"] = st.session_state["scan_cache"]
+                        st.session_state["result"] = new_result
+                        st.session_state["cfg"] = cfg2
+                        bar_o.progress(1.0, text="完成")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"一鍵校準失敗：{e}")
+                if st.session_state.get("autocal_plan"):
+                    _plan = st.session_state["autocal_plan"]
+                    if _plan["summary"]:
+                        st.success("✅ 已自動套用並重掃：" + "、".join(_plan["summary"]))
+                    else:
+                        st.info("本次無 OOS 通過的建議可套用（維持原參數）。")
+                    if _plan["skipped"]:
+                        st.caption("未套用（安全閘）：" + "、".join(
+                            f"{n}（{r}）" for n, r in _plan["skipped"]))
+
         # 精簡 KPI（4 個）
         s = summary.iloc[0]
         cols = st.columns(4)

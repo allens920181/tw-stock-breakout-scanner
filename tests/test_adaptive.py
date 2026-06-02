@@ -2,7 +2,9 @@
 import numpy as np
 import pandas as pd
 
-from src.adaptive import recommend_from_backtest, recommend_regime_thresholds
+from src.adaptive import (
+    pick_applicable, recommend_from_backtest, recommend_regime_thresholds,
+)
 from src.indicators import add_indicators
 
 
@@ -55,6 +57,29 @@ def test_recommend_thresholds_structure():
         if p["recommended"] is not None:
             grid = CFG["sensitivity"]["plateau"][f"{p['param']}_grid"]
             assert p["recommended"] in grid
+
+
+def test_pick_applicable_oos_gate():
+    ar = {
+        "params": [
+            {"param": "min_score", "current": 6, "recommended": 5, "oos_ok": True},
+            {"param": "atr_mult", "current": 1.5, "recommended": 2.5, "oos_ok": False},
+            {"param": "tp_mult", "current": 2.0, "recommended": 2.5, "oos_ok": True},
+        ],
+        "weights": {"current": {"kd": 1}, "recommended": {"kd": 2, "macd": 1}},
+        "regime": {"by_regime": {
+            "bull": {"recommended": 4}, "neutral": {"recommended": 6},
+            "bear": {"recommended": 8}}},
+    }
+    plan = pick_applicable(ar, require_oos=True)
+    ap = plan["applied"]
+    assert ap["thr_enter"] == 5                 # OOS✅ → 套用
+    assert "f_atr_mult" not in ap               # OOS❌ → 擋下
+    assert ap["weights"] == {"kd": 2, "macd": 1}
+    assert ap["regime_thresholds"] == {"bull": 4, "neutral": 6, "bear": 8}
+    # tp_mult 永不套用（回測框架）；atr 被擋的原因有列入 skipped
+    reasons = dict(plan["skipped"])
+    assert "atr_mult" in reasons
 
 
 def test_regime_thresholds_fallback():

@@ -150,6 +150,49 @@ def recommend_regime_thresholds(resolved, cfg, grid, lookback, hold_days,
             "labels": _REGIME_LABEL}
 
 
+def pick_applicable(ar, *, require_oos=True):
+    """
+    從建議包挑出「可安全自動套用」的項目（一鍵校準用）。
+    安全閘：門檻類（min_score/atr_mult）預設只在 OOS 同向(✅) 時才套用；
+    權重為 lift 驗證、regime 為分桶最佳，視為已驗證直接納入。
+    回傳 {applied: {...}, skipped: [(名稱, 原因)], summary: [...]}。
+    """
+    applied, skipped, summary = {}, [], []
+
+    for p in ar.get("params", []) or []:
+        name, rec, oos = p["param"], p.get("recommended"), p.get("oos_ok")
+        if name == "tp_mult":
+            continue  # 回測停利框架，不影響即時掃描
+        if rec is None:
+            skipped.append((name, "無明顯高原"))
+            continue
+        if require_oos and oos is not True:
+            skipped.append((name, "OOS 未通過/不足"))
+            continue
+        if name == "min_score":
+            applied["thr_enter"] = int(rec)
+            summary.append(f"進場門檻→{int(rec)}")
+        elif name == "atr_mult":
+            applied["f_atr_mult"] = float(rec)
+            summary.append(f"ATR停損→×{rec}")
+
+    w = ar.get("weights")
+    if w and w.get("recommended"):
+        applied["weights"] = {k: int(v) for k, v in w["recommended"].items()}
+        summary.append("評分權重(lift)")
+
+    rg = ar.get("regime")
+    if rg and rg.get("by_regime"):
+        rt = {k: int(rg["by_regime"][k]["recommended"])
+              for k in ("bull", "neutral", "bear")
+              if rg["by_regime"].get(k, {}).get("recommended") is not None}
+        if rt:
+            applied["regime_thresholds"] = rt
+            summary.append(f"隨大盤切門檻{rt}")
+
+    return {"applied": applied, "skipped": skipped, "summary": summary}
+
+
 def recommend_from_backtest(resolved, cfg, *, lookback=120, hold_days=10,
                             targets=("thresholds", "weights", "regime"),
                             fe_result=None, progress_cb=None):
