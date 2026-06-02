@@ -559,7 +559,7 @@ with st.sidebar:
 
     st.divider()
 
-    with st.expander("部位管理", expanded=True):
+    with st.expander("部位與風控", expanded=True):
         total_capital = st.number_input(
             "總資金（元）", min_value=100_000,
             value=int(base_cfg.get("position_sizing", {}).get("total_capital", 1_000_000)),
@@ -575,8 +575,23 @@ with st.sidebar:
             st.session_state.get("max_pos_pct", 20), 5, key="max_pos_pct",
             help=HELP["max_pos_pct"],
         ) / 100
+        st.slider(
+            "ATR 停損倍數", 1.0, 4.0,
+            float(st.session_state.get("f_atr_mult", base_cfg["filters"].get("atr_mult", 1.5))),
+            0.5, key="f_atr_mult",
+            help="停損 = 進場價 − ATR14 × 此倍數。建議模式可自動校準到高原中心。",
+        )
+        st.slider(
+            "流動性上限（部位 ≤ 此%×20日均量）", 0, 30,
+            int(st.session_state.get(
+                "max_adv_pct",
+                base_cfg.get("position_sizing", {}).get("max_adv_pct", 0.10) * 100)),
+            5, key="_max_adv_pct_pct",
+            help="避免小型股算出『進得去出不來』的部位。0=關閉。例如 10% = 部位不超過一日均量的 10%。",
+        )
+        st.session_state["max_adv_pct"] = st.session_state["_max_adv_pct_pct"] / 100
 
-    with st.expander("品質過濾", expanded=False):
+    with st.expander("選股過濾", expanded=False):
         min_price = st.number_input(
             "最低股價", min_value=0.0,
             value=st.session_state.get("min_price", 10.0), step=1.0, key="min_price",
@@ -597,6 +612,19 @@ with st.sidebar:
             st.session_state.get("min_risk_pct", 0.02) * 100, 0.5,
             key="min_risk_pct_slider", help=HELP["min_risk_pct"],
         ) / 100
+        _amba = base_cfg.get("strategy", {}).get("ambush", {})
+        st.checkbox(
+            "潛伏模式：RS 硬門檻（排除弱於大盤）",
+            value=bool(st.session_state.get("amb_rs_gate", _amba.get("require_positive_rs", True))),
+            key="amb_rs_gate",
+            help="開啟後，相對強度 RS < 門檻的弱勢股即使蓄勢成立也只給「觀察·弱於大盤」，不給進場。",
+        )
+        st.slider(
+            "RS 門檻（%）", -5.0, 10.0,
+            float(st.session_state.get("amb_min_rs", _amba.get("min_rs", 0.0))),
+            0.5, key="amb_min_rs",
+            help="個股 60 日報酬須 ≥ 大盤 + 此值。0=只要不輸大盤；正值=要明顯強過大盤。",
+        )
 
     with st.expander("評分權重 / 門檻", expanded=False):
         w = base_cfg["scoring"]["weights"]
@@ -631,43 +659,6 @@ with st.sidebar:
             "觀察 ≥", 0, 20,
             st.session_state.get("thr_watch", 5), key="thr_watch",
             help=HELP["thr_watch"],
-        )
-
-    with st.expander("進階濾網（成本 / 潛伏 RS）", expanded=False):
-        _bca = base_cfg.get("costs", {})
-        _amba = base_cfg.get("strategy", {}).get("ambush", {})
-        st.slider(
-            "回測滑價（單邊 %）", 0.0, 0.5,
-            float(st.session_state.get("cost_slip", _bca.get("slippage_pct", 0.0015) * 100)),
-            0.05, key="cost_slip",
-            help="小型股突破成交常偏離訊號價；買貴/賣便宜各扣此%。讓回測數字更誠實。",
-        )
-        st.slider(
-            "ATR 停損倍數", 1.0, 4.0,
-            float(st.session_state.get("f_atr_mult", base_cfg["filters"].get("atr_mult", 1.5))),
-            0.5, key="f_atr_mult",
-            help="停損 = 進場價 − ATR14 × 此倍數。建議模式可自動校準到高原中心。",
-        )
-        st.slider(
-            "流動性上限（部位 ≤ 此%×20日均量）", 0, 30,
-            int(st.session_state.get(
-                "max_adv_pct",
-                base_cfg.get("position_sizing", {}).get("max_adv_pct", 0.10) * 100)),
-            5, key="_max_adv_pct_pct",
-            help="避免小型股算出『進得去出不來』的部位。0=關閉。例如 10% = 部位不超過一日均量的 10%。",
-        )
-        st.session_state["max_adv_pct"] = st.session_state["_max_adv_pct_pct"] / 100
-        st.checkbox(
-            "潛伏模式：RS 硬門檻（排除弱於大盤）",
-            value=bool(st.session_state.get("amb_rs_gate", _amba.get("require_positive_rs", True))),
-            key="amb_rs_gate",
-            help="開啟後，相對強度 RS < 門檻的弱勢股即使蓄勢成立也只給「觀察·弱於大盤」，不給進場。",
-        )
-        st.slider(
-            "RS 門檻（%）", -5.0, 10.0,
-            float(st.session_state.get("amb_min_rs", _amba.get("min_rs", 0.0))),
-            0.5, key="amb_min_rs",
-            help="個股 60 日報酬須 ≥ 大盤 + 此值。0=只要不輸大盤；正值=要明顯強過大盤。",
         )
 
     st.divider()
@@ -1104,14 +1095,18 @@ def show_detail_dialog(row, ohlc_map):
     entry_type = row.get("進場類型", "—")
     entry_note = row.get("進場條件", "")
 
-    c = st.columns(7)
+    # 進場決策列（評分/進場/停損/風險）
+    c = st.columns(4)
     c[0].metric("評分", score_d)
     c[1].metric("進場", entry if entry is not None else "—")
     c[2].metric("停損", stop if stop is not None else "—")
-    c[3].metric("目標 1", t1 if t1 is not None else "—")
-    c[4].metric("目標 2", t2 if t2 is not None else "—")
-    c[5].metric("風險", f"{risk_pct}%")
-    c[6].metric("建議", f"{lots} 張")
+    c[3].metric("風險", f"{risk_pct}%")
+    # 目標與部位列
+    c2 = st.columns(4)
+    c2[0].metric("目標 1", t1 if t1 is not None else "—")
+    c2[1].metric("目標 2", t2 if t2 is not None else "—")
+    c2[2].metric("建議", f"{lots} 張")
+    c2[3].metric("佔資金", f"{cost_pct}%")
 
     if entry_note:
         st.caption(f"進場類型：{entry_type} · {entry_note}")
@@ -2270,6 +2265,12 @@ with tab3:
                          float(_bc.get("fee_discount", 1.0)), 0.05, key="cost_disc")
         cc4.number_input("證交稅 %", 0.0, 0.5,
                          _bc.get("tax_rate", 0.003) * 100, 0.05, key="cost_tax")
+        st.slider(
+            "滑價（單邊 %）", 0.0, 0.5,
+            float(st.session_state.get("cost_slip", _bc.get("slippage_pct", 0.0015) * 100)),
+            0.05, key="cost_slip",
+            help="小型股突破成交常偏離訊號價；買貴/賣便宜各扣此%。讓回測/壓力測試更誠實。",
+        )
         st.checkbox("因子驗證也扣成本", value=_bc.get("apply_to_factor_eval", False),
                     key="cost_apply_fe",
                     help="預設關閉，避免因子 lift 與回測雙重成本口徑混淆")
