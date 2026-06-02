@@ -73,7 +73,8 @@ def _holding_alerts(chips, revenue, market_state):
 
 def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
                     time_stop_days=10, profit_taking_at_1r=True,
-                    atr_trail_mult=3.0, chips=None, revenue=None, market_state=None):
+                    atr_trail_mult=3.0, chips=None, revenue=None, market_state=None,
+                    atr_mult_entry=1.5):
     """
     產生持股賣出建議。
     atr_trail_mult: Chandelier 移動停利 = 進場後最高價 - ATR14 × 此倍數
@@ -116,9 +117,30 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     profit = close - entry_price
     profit_pct = profit / entry_price * 100 if entry_price > 0 else 0
 
-    # 1R / 2R 估算（以進場價到 MA20 之距離視為 risk）
+    # ===== 風險基準（1R）=====
+    # 修正：用「進場日當天 ATR×倍數」作為固定原始風險（與掃描器停損同邏輯），
+    # 不再用會隨 MA20 浮動的重估停損 → R 穩定、且與回測/live OOS 口徑一致。
+    atr_at_entry = None
+    if entry_date is not None and "ATR14" in df.columns:
+        try:
+            df_at_entry = df[df.index.date <= entry_date]
+            if len(df_at_entry):
+                v = df_at_entry["ATR14"].iloc[-1]
+                if pd.notna(v):
+                    atr_at_entry = float(v)
+        except Exception:
+            atr_at_entry = None
+
+    # 重估停損仍用於「出場決策」（跌破 MA20 / 近期低點）
     estimated_stop = max(ma20, float(df["Low"].iloc[-10:].min()))
-    risk = entry_price - estimated_stop if entry_price > estimated_stop else 0
+    risk_atr = atr_at_entry if (atr_at_entry and atr_at_entry > 0) else atr
+    if risk_atr and risk_atr > 0:
+        risk = risk_atr * atr_mult_entry               # 固定原始風險（1R），不隨 MA20 浮動
+        hard_stop = entry_price - risk
+    else:
+        # 最終退路：完全無 ATR 時才用重估停損
+        risk = entry_price - estimated_stop if entry_price > estimated_stop else 0
+        hard_stop = estimated_stop
     r_multiple = profit / risk if risk > 0 else None
 
     # ===== 出場規則 =====
@@ -178,7 +200,7 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
         time_stop_str = None
 
     exit_plan = {
-        "停損價": round(estimated_stop, 2),
+        "停損價": round(hard_stop, 2),
         "目標1(+1R半倉)": target_1r,
         "目標2(+2R出清)": target_2r,
         "移動停利MA10": trail_stop,
