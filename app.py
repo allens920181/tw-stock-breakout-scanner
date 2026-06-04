@@ -26,6 +26,7 @@ from src.macro import classify_us_market
 from src.market import classify_market
 from src.name_lookup import lookup_names
 from src.preferences import load_prefs, save_prefs
+from src import store
 from src.report import write_excel
 from src.runner import (
     run_adaptive_recommend, run_backtest, run_evaluate_journal, run_factor_eval,
@@ -377,6 +378,40 @@ def get_code_name_map():
 base_cfg = get_base_config()
 
 
+# 雲端會員空間（Neon）：未設定 secrets → 停用，App 行為與原本完全一致
+try:
+    store.configure(st.secrets.get("DATABASE_URL", ""))
+except Exception:
+    store.configure(None)
+try:
+    _CLOUD_PASS = st.secrets.get("APP_PASSCODE", "")
+except Exception:
+    _CLOUD_PASS = ""
+
+
+def _cloud_owner():
+    return st.session_state.get("cloud_owner")
+
+
+# 登入後一次性從雲端載入持股 / 訊號日誌
+if _cloud_owner() and not st.session_state.get("_cloud_loaded"):
+    try:
+        _cdf = store.load_holdings(_cloud_owner())
+        if _cdf is not None and len(_cdf):
+            st.session_state["holdings_df"] = _cdf
+            st.session_state["_hold_sig"] = _cdf.to_json()
+    except Exception:
+        pass
+    try:
+        from src import journal as _jrn
+        _cj = store.load_journal(_cloud_owner())
+        if _cj is not None:
+            _jrn.save_journal(_cj)          # 還原雲端日誌到本機工作檔
+    except Exception:
+        pass
+    st.session_state["_cloud_loaded"] = True
+
+
 # 載入使用者偏好
 if "_prefs_loaded" not in st.session_state:
     prefs = load_prefs()
@@ -686,6 +721,27 @@ with st.sidebar:
         )
 
     st.divider()
+    if store.is_enabled():
+        _owner = st.session_state.get("cloud_owner")
+        _icon = "☁ 已登入" if _owner else "☁ 雲端空間"
+        with st.expander(_icon, expanded=not _owner):
+            if _owner:
+                st.success("持股 / 日誌 已雲端保存（重整、換裝置都在）")
+                if st.button("登出雲端", use_container_width=True):
+                    for k in ("cloud_owner", "_cloud_loaded", "_hold_sig"):
+                        st.session_state.pop(k, None)
+                    st.rerun()
+            else:
+                st.caption("輸入密碼登入，持股與訊號日誌將永久保存於雲端。")
+                _pw = st.text_input("密碼", type="password", key="cloud_pw")
+                if st.button("登入雲端", type="primary", use_container_width=True):
+                    if _CLOUD_PASS and _pw == _CLOUD_PASS:
+                        st.session_state["cloud_owner"] = "me"
+                        st.session_state.pop("_cloud_loaded", None)
+                        st.rerun()
+                    else:
+                        st.error("密碼錯誤或未設定 APP_PASSCODE")
+
     with st.expander("偏好設定", expanded=False):
         st.caption("儲存後下次啟動會自動套用")
         if st.button("儲存目前設定", use_container_width=True):
@@ -1738,13 +1794,15 @@ with tab1:
                 logging.getLogger("main").warning("存歷史失敗：%s", e)
             # 前向訊號日誌（live OOS）：記錄本次進場清單
             try:
-                from src.journal import log_signals
+                from src.journal import log_signals, load_journal as _ld_jrn
                 _added = log_signals(
                     result["df"], today_tw().isoformat(),
                     mode=mode, signals=("進場",))
                 if _added:
                     st.toast(f"已記錄 {_added} 筆進場到訊號日誌（可在『歷史』追蹤實戰績效）",
                              icon="📓")
+                    if _cloud_owner():          # 鏡像到雲端（永久保存）
+                        store.save_journal(_cloud_owner(), _ld_jrn())
             except Exception as e:
                 logging.getLogger("main").warning("訊號日誌記錄失敗：%s", e)
         except Exception as e:
@@ -2135,6 +2193,15 @@ with tab2:
     # 把當前編輯狀態鏡像回 holdings_df 給下游讀 KPI / 分析使用
     # （在 fragment 之外，不會影響編輯器的內部追蹤）
     st.session_state["holdings_df"] = edited
+    # 雲端自動保存（僅內容變動時才寫，避免每次 rerun 都打 DB）
+    if _cloud_owner():
+        try:
+            _sig = edited.to_json()
+            if st.session_state.get("_hold_sig") != _sig:
+                if store.save_holdings(_cloud_owner(), edited):
+                    st.session_state["_hold_sig"] = _sig
+        except Exception:
+            pass
 
     # ============ 分析按鈕 ============
     st.markdown("")
@@ -2958,6 +3025,8 @@ with tab4:
     if jc3.button("清空日誌", key="clear_journal", use_container_width=True,
                   disabled=not _jrecords):
         save_journal([])
+        if _cloud_owner():
+            store.save_journal(_cloud_owner(), [])
         st.session_state.pop("journal_eval", None)
         st.toast("已清空訊號日誌", icon="🗑")
         st.rerun()

@@ -25,3 +25,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Streamlit secrets（雲端密鑰，勿提交）
+.streamlit/secrets.toml

@@ -187,3 +187,6 @@ websockets==16.0
     #   yfinance
 yfinance==1.4.1
     # via tw-stock-breakout-scanner
+
+# 雲端會員空間（Neon / PostgreSQL）持久化
+psycopg2-binary==2.9.10
