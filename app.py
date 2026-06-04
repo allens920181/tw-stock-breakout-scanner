@@ -724,9 +724,36 @@ with st.sidebar:
     if store.is_enabled():
         _owner = st.session_state.get("cloud_owner")
         _icon = "☁ 已登入" if _owner else "☁ 雲端空間"
-        with st.expander(_icon, expanded=not _owner):
+        with st.expander(_icon, expanded=True):
             if _owner:
-                st.success("持股 / 日誌 已雲端保存（重整、換裝置都在）")
+                ok, msg = store.ping()
+                if ok:
+                    st.success(f"🔗 雲端連線正常")
+                    try:
+                        _n = len(store.load_holdings(_owner) or [])
+                    except Exception:
+                        _n = 0
+                    st.caption(f"雲端持股：{_n} 筆")
+                else:
+                    st.error(f"⚠ 雲端連線失敗：{msg}")
+                    st.caption("→ 多半是 DATABASE_URL 連線字串有誤（見下方提示）。持股暫存本機。")
+                cb1, cb2 = st.columns(2)
+                if cb1.button("⬆ 立即存雲端", use_container_width=True):
+                    _df = st.session_state.get("holdings_df")
+                    if store.save_holdings(_owner, _df):
+                        st.session_state["_hold_sig"] = _df.to_json() if _df is not None else ""
+                        st.toast("已存到雲端", icon="✅")
+                    else:
+                        st.error(f"存雲端失敗：{store.last_error}")
+                if cb2.button("⬇ 從雲端載入", use_container_width=True):
+                    _cd = store.load_holdings(_owner)
+                    if _cd is not None:
+                        st.session_state["holdings_df"] = _cd
+                        st.session_state["_hold_sig"] = _cd.to_json()
+                        st.toast(f"已載入 {len(_cd)} 筆", icon="✅")
+                        st.rerun()
+                    else:
+                        st.info("雲端尚無持股資料")
                 if st.button("登出雲端", use_container_width=True):
                     for k in ("cloud_owner", "_cloud_loaded", "_hold_sig"):
                         st.session_state.pop(k, None)

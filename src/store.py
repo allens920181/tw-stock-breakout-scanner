@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 _DSN = None
 _SCHEMA_READY = False
+last_error = None     # 最近一次 DB 操作的錯誤訊息（給診斷用）
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS tw_kv (
@@ -50,7 +51,30 @@ def _ensure_schema(cur):
         _SCHEMA_READY = True
 
 
+def ping():
+    """測試連線：回 (ok: bool, msg: str)。給 UI 顯示『到底連上沒』。"""
+    global last_error
+    if not _DSN:
+        return False, "未設定 DATABASE_URL"
+    try:
+        import psycopg2  # noqa: F401
+    except Exception as e:
+        last_error = f"未安裝 psycopg2：{e}"
+        return False, last_error
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_schema(cur)
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        last_error = None
+        return True, "連線正常，資料表就緒"
+    except Exception as e:
+        last_error = str(e)
+        return False, str(e)
+
+
 def kv_get(owner, key, default=None):
+    global last_error
     if not _DSN:
         return default
     try:
@@ -60,12 +84,15 @@ def kv_get(owner, key, default=None):
             row = cur.fetchone()
             return row[0] if row else default
     except Exception as e:
+        last_error = str(e)
         log.warning("雲端讀取失敗（%s/%s）：%s", owner, key, e)
         return default
 
 
 def kv_set(owner, key, value):
+    global last_error
     if not _DSN:
+        last_error = "未設定 DATABASE_URL"
         return False
     try:
         payload = json.dumps(value, ensure_ascii=False, default=str)
@@ -77,8 +104,10 @@ def kv_set(owner, key, value):
                 "updated_at=now()",
                 (owner, key, payload),
             )
+        last_error = None
         return True
     except Exception as e:
+        last_error = str(e)
         log.warning("雲端寫入失敗（%s/%s）：%s", owner, key, e)
         return False
 
