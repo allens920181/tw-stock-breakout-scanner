@@ -3271,4 +3271,33 @@ with tab6:
                 closes = [round(float(x), 2) for x in dfx["Close"].iloc[-5:]]
                 st.caption("近 5 日收盤：" + " → ".join(str(c) for c in closes))
 
+            # ---- ➕ 加碼檢查 ----
+            with st.expander("➕ 加碼檢查（現價加碼是否合理）", expanded=False):
+                from src.sizing import evaluate_add
+                cur_px = sc.get("目前現價") or sc.get("收盤價")
+                add_lots = st.number_input("想加幾張", min_value=1, max_value=100,
+                                           value=1, step=1, key="add_lots")
+                ev = evaluate_add(
+                    build_cfg(), cur_px, sc.get("ATR14"),
+                    sc.get("乖離MA20%"), sc.get("相對強度RS%"), int(add_lots))
+                _vc = ("bull" if ev["verdict"].startswith("🟢")
+                       else ("bear" if ev["verdict"].startswith("🔴") else "neutral"))
+                st.markdown(
+                    f"<div class='hdr-advice {_vc}'><span class='dot'></span>"
+                    f"<b>加碼判斷</b>　{ev['verdict']}</div>", unsafe_allow_html=True)
+                if ev["blocks"]:
+                    for b in ev["blocks"]:
+                        st.error("✕ " + b)
+                for w in ev["warns"]:
+                    st.warning("⚠ " + w)
+                ac1, ac2, ac3, ac4 = st.columns(4)
+                ac1.metric("加碼停損", ev["stop"])
+                ac2.metric("每股風險", ev["risk_per_share"])
+                ac3.metric("加碼風險", f"{ev['add_risk']:,.0f}" if ev["add_risk"] is not None else "—")
+                ac4.metric("佔資金%", f"{ev['cost_pct']}%" if ev["cost_pct"] is not None else "—")
+                if ev.get("max_lots_in_budget") is not None:
+                    st.caption(f"💡 此價在單筆風險預算內最多可加 **{ev['max_lots_in_budget']} 張**"
+                               f"（停損 {ev['stop']}，每股風險 {ev['risk_per_share']}）")
+                st.caption("加碼鐵律：過度延伸別追高；加碼量 ≤ 原倉、加後上移整體停損、總風險守單筆上限。")
+
             st.caption("⚠ 決策輔助、非投資建議；籌碼/營收為當日 best-effort 資料。")

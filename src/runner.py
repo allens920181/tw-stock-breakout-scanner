@@ -393,6 +393,8 @@ def run_single_lookup(code, cfg, company_name="", entry_price=None,
             atr_trail_mult=hcfg.get("atr_trail_mult", 3.0),
             let_winners_run=hcfg.get("let_winners_run", True),
             strong_adx=hcfg.get("strong_adx", 25.0),
+            strong_streak=hcfg.get("strong_streak", 3),
+            strong_vol_mult=hcfg.get("strong_vol_mult", 1.5),
             chips=chips, revenue=revenue, market_state=market_state)
 
     emit(1.0, "完成")
@@ -496,6 +498,8 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
             atr_trail_mult=hcfg.get("atr_trail_mult", 3.0),
             let_winners_run=hcfg.get("let_winners_run", True),
             strong_adx=hcfg.get("strong_adx", 25.0),
+            strong_streak=hcfg.get("strong_streak", 3),
+            strong_vol_mult=hcfg.get("strong_vol_mult", 1.5),
             chips=chips_map.get(h["code"]),
             revenue=revenue_map.get(h["code"]),
             market_state=market_state,

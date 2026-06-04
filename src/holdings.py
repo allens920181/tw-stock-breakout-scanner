@@ -74,13 +74,16 @@ def _holding_alerts(chips, revenue, market_state):
 def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
                     time_stop_days=10, profit_taking_at_1r=True,
                     atr_trail_mult=3.0, chips=None, revenue=None, market_state=None,
-                    atr_mult_entry=1.5, let_winners_run=True, strong_adx=25.0):
+                    atr_mult_entry=1.5, let_winners_run=True, strong_adx=25.0,
+                    strong_streak=3, strong_vol_mult=1.5):
     """
     產生持股賣出建議。
     atr_trail_mult: Chandelier 移動停利 = 進場後最高價 - ATR14 × 此倍數
     chips/revenue/market_state: 持股期間主動示警（籌碼翻空/營收變臉/大盤轉空）
     let_winners_run: 達 +2R 時若趨勢仍強→強勢續抱（靠移動停利保護），避免砍掉暴漲股
     strong_adx: ADX ≥ 此值視為趨勢強（續抱門檻）
+    strong_streak/strong_vol_mult: 法人連買 ≥N 天 + 帶量突破 → 即使 ADX 未達標也算強勢
+        （ADX 落後，新鮮突破常被誤判轉弱；用籌碼+量能補位）
     """
     if df is None or df.empty or len(df) < 60:
         return _row(symbol, name, market, entry_price, entry_date, shares,
@@ -152,11 +155,22 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     above_ma10 = close > ma10
     # 趨勢仍強：站上 MA10 + ADX 夠強（無 ADX 時退而要求同時站上 MA20）
     # 不綁 KD：KD 死叉+跌破 MA20 已是獨立的「技術轉弱」出場規則，強勢 runner KD 常在高檔震盪
-    strong_trend = (
-        above_ma10
-        and (adx_v >= strong_adx if adx_v is not None else close > ma20)
-    )
-    if adx_v is not None:
+    adx_strong = above_ma10 and (adx_v >= strong_adx if adx_v is not None else close > ma20)
+
+    # 法人連買 + 帶量突破 → 即使 ADX 落後也算強勢（修正新鮮突破被誤判轉弱）
+    vol_now = float(latest["Volume"])
+    vol20h = float(df["Volume"].rolling(20).mean().iloc[-1])
+    high_20 = float(df["High"].iloc[-21:-1].max())
+    broke_with_vol = (close >= high_20 * 0.99 and vol20h > 0
+                      and vol_now > vol20h * strong_vol_mult)
+    inst_streak = int(chips.get("inst_buy_streak", 0)) if chips else 0
+    fresh_strong = above_ma10 and inst_streak >= strong_streak and broke_with_vol
+
+    strong_trend = adx_strong or fresh_strong
+    if fresh_strong and not adx_strong:
+        ts_label = f"強(法人連買{inst_streak}日+帶量突破·ADX{adx_v:.0f}落後)" if adx_v is not None \
+                   else f"強(法人連買{inst_streak}日+帶量突破)"
+    elif adx_v is not None:
         ts_label = (f"強(ADX {adx_v:.0f}·站MA10)" if strong_trend
                     else f"轉弱(ADX {adx_v:.0f}{'' if above_ma10 else '·破MA10'})")
     else:
