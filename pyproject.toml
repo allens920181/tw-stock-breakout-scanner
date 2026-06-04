@@ -12,6 +12,7 @@ dependencies = [
     "streamlit>=1.35",
     "plotly>=5.18",
     "psycopg2-binary>=2.9",
+    "pg8000>=1.31",
 ]
 
 [dependency-groups]

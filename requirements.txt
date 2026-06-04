@@ -6,6 +6,8 @@ anyio==4.13.0
     # via
     #   starlette
     #   streamlit
+asn1crypto==1.5.1
+    # via scramp
 attrs==26.1.0
     # via
     #   jsonschema
@@ -101,6 +103,8 @@ pandas==3.0.3 ; python_full_version >= '3.11'
     #   yfinance
 peewee==4.0.6
     # via yfinance
+pg8000==1.31.5
+    # via tw-stock-breakout-scanner
 pillow==12.2.0
     # via streamlit
 platformdirs==4.10.0
@@ -124,7 +128,9 @@ pydeck==0.9.2
 pygments==2.20.0
     # via rich
 python-dateutil==2.9.0.post0
-    # via pandas
+    # via
+    #   pandas
+    #   pg8000
 python-multipart==0.0.29
     # via streamlit
 pytz==2026.2
@@ -151,6 +157,8 @@ rpds-py==2026.5.1 ; python_full_version >= '3.11'
     # via
     #   jsonschema
     #   referencing
+scramp==1.4.8
+    # via pg8000
 six==1.17.0
     # via python-dateutil
 smmap==5.0.3

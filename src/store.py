@@ -39,16 +39,36 @@ def is_enabled():
     return bool(_DSN)
 
 
-def _conn():
-    import psycopg2  # 延遲載入
-    return psycopg2.connect(_DSN, connect_timeout=10)
+def _connect():
+    """雙驅動容錯：優先 psycopg2，沒有就用純 Python 的 pg8000（任何平台都裝得起）。"""
+    try:
+        import psycopg2
+        return psycopg2.connect(_DSN, connect_timeout=10)
+    except ImportError:
+        pass
+    import ssl
+    from urllib.parse import urlparse
+    import pg8000.dbapi
+    u = urlparse(_DSN)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return pg8000.dbapi.connect(
+        user=u.username, password=u.password,
+        host=u.hostname, port=u.port or 5432,
+        database=(u.path or "/").lstrip("/"),
+        ssl_context=ctx, timeout=15,
+    )
 
 
-def _ensure_schema(cur):
-    global _SCHEMA_READY
-    if not _SCHEMA_READY:
-        cur.execute(_CREATE_SQL)
-        _SCHEMA_READY = True
+def _coerce(val):
+    """jsonb 回傳：psycopg2 給 dict/list、pg8000 給字串 → 統一成 Python 物件。"""
+    if isinstance(val, (str, bytes)):
+        try:
+            return json.loads(val)
+        except Exception:
+            return val
+    return val
 
 
 def ping():
@@ -57,36 +77,54 @@ def ping():
     if not _DSN:
         return False, "未設定 DATABASE_URL"
     try:
-        import psycopg2  # noqa: F401
-    except Exception as e:
-        last_error = f"未安裝 psycopg2：{e}"
+        conn = _connect()
+    except ImportError:
+        last_error = "未安裝資料庫驅動（psycopg2 / pg8000）"
         return False, last_error
+    except Exception as e:
+        last_error = str(e)
+        return False, str(e)
     try:
-        with _conn() as conn, conn.cursor() as cur:
-            _ensure_schema(cur)
-            cur.execute("SELECT 1")
-            cur.fetchone()
+        cur = conn.cursor()
+        cur.execute(_CREATE_SQL)
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        conn.commit()
         last_error = None
         return True, "連線正常，資料表就緒"
     except Exception as e:
         last_error = str(e)
         return False, str(e)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def kv_get(owner, key, default=None):
     global last_error
     if not _DSN:
         return default
+    conn = None
     try:
-        with _conn() as conn, conn.cursor() as cur:
-            _ensure_schema(cur)
-            cur.execute("SELECT value FROM tw_kv WHERE owner=%s AND key=%s", (owner, key))
-            row = cur.fetchone()
-            return row[0] if row else default
+        conn = _connect()
+        cur = conn.cursor()
+        cur.execute(_CREATE_SQL)
+        cur.execute("SELECT value FROM tw_kv WHERE owner=%s AND key=%s", (owner, key))
+        row = cur.fetchone()
+        conn.commit()
+        return _coerce(row[0]) if row else default
     except Exception as e:
         last_error = str(e)
         log.warning("雲端讀取失敗（%s/%s）：%s", owner, key, e)
         return default
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 
 def kv_set(owner, key, value):
@@ -94,22 +132,31 @@ def kv_set(owner, key, value):
     if not _DSN:
         last_error = "未設定 DATABASE_URL"
         return False
+    conn = None
     try:
         payload = json.dumps(value, ensure_ascii=False, default=str)
-        with _conn() as conn, conn.cursor() as cur:
-            _ensure_schema(cur)
-            cur.execute(
-                "INSERT INTO tw_kv (owner, key, value) VALUES (%s, %s, %s) "
-                "ON CONFLICT (owner, key) DO UPDATE SET value=EXCLUDED.value, "
-                "updated_at=now()",
-                (owner, key, payload),
-            )
+        conn = _connect()
+        cur = conn.cursor()
+        cur.execute(_CREATE_SQL)
+        cur.execute(
+            "INSERT INTO tw_kv (owner, key, value) VALUES (%s, %s, %s::jsonb) "
+            "ON CONFLICT (owner, key) DO UPDATE SET value=EXCLUDED.value, "
+            "updated_at=now()",
+            (owner, key, payload),
+        )
+        conn.commit()
         last_error = None
         return True
     except Exception as e:
         last_error = str(e)
         log.warning("雲端寫入失敗（%s/%s）：%s", owner, key, e)
         return False
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 
 # ========== 持股（DataFrame <-> records）==========
