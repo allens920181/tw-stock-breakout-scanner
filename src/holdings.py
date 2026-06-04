@@ -74,11 +74,13 @@ def _holding_alerts(chips, revenue, market_state):
 def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
                     time_stop_days=10, profit_taking_at_1r=True,
                     atr_trail_mult=3.0, chips=None, revenue=None, market_state=None,
-                    atr_mult_entry=1.5):
+                    atr_mult_entry=1.5, let_winners_run=True, strong_adx=25.0):
     """
     產生持股賣出建議。
     atr_trail_mult: Chandelier 移動停利 = 進場後最高價 - ATR14 × 此倍數
     chips/revenue/market_state: 持股期間主動示警（籌碼翻空/營收變臉/大盤轉空）
+    let_winners_run: 達 +2R 時若趨勢仍強→強勢續抱（靠移動停利保護），避免砍掉暴漲股
+    strong_adx: ADX ≥ 此值視為趨勢強（續抱門檻）
     """
     if df is None or df.empty or len(df) < 60:
         return _row(symbol, name, market, entry_price, entry_date, shares,
@@ -143,9 +145,27 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
         hard_stop = estimated_stop
     r_multiple = profit / risk if risk > 0 else None
 
+    # ===== 趨勢強度（決定獲利股「續抱 or 了結」）=====
+    adx_v = (float(latest["ADX14"]) if "ADX14" in df.columns
+             and pd.notna(latest.get("ADX14")) else None)
+    kd_dead = (k < d - 1.0 and k > 50)                    # 高檔 KD 明確死叉（留 1 點緩衝避免黏在一起誤判）
+    above_ma10 = close > ma10
+    # 趨勢仍強：站上 MA10 + ADX 夠強（無 ADX 時退而要求同時站上 MA20）
+    # 不綁 KD：KD 死叉+跌破 MA20 已是獨立的「技術轉弱」出場規則，強勢 runner KD 常在高檔震盪
+    strong_trend = (
+        above_ma10
+        and (adx_v >= strong_adx if adx_v is not None else close > ma20)
+    )
+    if adx_v is not None:
+        ts_label = (f"強(ADX {adx_v:.0f}·站MA10)" if strong_trend
+                    else f"轉弱(ADX {adx_v:.0f}{'' if above_ma10 else '·破MA10'})")
+    else:
+        ts_label = "強(站MA10/20)" if strong_trend else "轉弱"
+
     # ===== 出場規則 =====
-    # 優先順序：停損 > 技術轉弱 > +2R > +1R > 移動停利(ATR) > 時間停損 > 移動停利(MA10) > 保留
-    # 移動停利排在時間停損之前：獲利部位跌破波段高就鎖利，不應被時間停損誤判
+    # 順序：停損 > 技術轉弱 > 移動停利(ATR) > +1R半倉 > 達標(強勢續抱/轉弱了結) > 時間停損 > MA10 > 保留
+    # 關鍵：移動停利(ATR) 上移到目標價之前 → 暴漲 runner 由「波段高−3ATR」保護、
+    #       不再被 +2R 硬砍；達 +2R 時改看趨勢強度決定續抱或了結（讓利潤奔跑）。
     actions = []
 
     # 1. 停損：跌破 MA20 且跌破近期 swing low
@@ -154,22 +174,27 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
         actions.append(("⛔ 停損出清", "全出", "跌破 MA20 + 近期低點"))
 
     # 2. 技術轉弱
-    elif k < d and k > 50 and close < ma20:
+    elif kd_dead and close < ma20:
         actions.append(("🔴 技術轉弱", "全出", f"KD 死叉 (K={k:.1f}<D={d:.1f}) + 跌破 MA20"))
 
-    # 3. 目標達成（+2R）
-    elif r_multiple is not None and r_multiple >= 2:
-        actions.append(("🟢 達 +2R 出清", "全出", f"+{r_multiple:.1f}R 報酬 {profit_pct:.1f}%"))
-
-    # 4. +1R 半倉
-    elif r_multiple is not None and r_multiple >= 1 and profit_taking_at_1r:
-        actions.append(("🟢 達 +1R 半倉鎖利", "賣半", f"+{r_multiple:.1f}R 報酬 {profit_pct:.1f}%"))
-
-    # 5. 移動停利（ATR Chandelier）：獲利中跌破「波段高 - ATR×倍數」
+    # 3. 移動停利（ATR Chandelier）：獲利中跌破「波段高 - ATR×倍數」→ runner 的保護傘
     elif chandelier is not None and profit_pct > 0 and close < chandelier:
         actions.append(("🟡 移動停利(ATR)", "全出",
                         f"跌破 Chandelier={chandelier:.2f}"
                         f"（波段高 {highest_since_entry:.2f} - {atr_trail_mult:.0f}×ATR）鎖利 {profit_pct:.1f}%"))
+
+    # 4. +1R 半倉（首次達 1R~2R 鎖一半，剩餘讓它跑）
+    elif r_multiple is not None and 1 <= r_multiple < 2 and profit_taking_at_1r:
+        actions.append(("🟢 達 +1R 半倉鎖利", "賣半", f"+{r_multiple:.1f}R 報酬 {profit_pct:.1f}%"))
+
+    # 5. 達 +2R 以上：趨勢仍強→強勢續抱（讓利潤奔跑）；轉弱→獲利了結
+    elif r_multiple is not None and r_multiple >= 2:
+        if let_winners_run and strong_trend:
+            actions.append(("🚀 強勢續抱", "保留",
+                            f"+{r_multiple:.1f}R 趨勢仍強（{ts_label}）→ 移動停利保護、讓利潤奔跑"))
+        else:
+            actions.append(("🟢 達 +2R 了結", "全出",
+                            f"+{r_multiple:.1f}R 動能轉弱（{ts_label}）→ 落袋"))
 
     # 6. 時間停損：持有 N 日仍 < 1R
     elif held_days is not None and held_days >= time_stop_days and (r_multiple is None or r_multiple < 1):
@@ -182,7 +207,7 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
 
     # 8. 保留
     else:
-        actions.append(("✅ 續抱", "保留", f"未觸發出場條件 報酬 {profit_pct:.1f}%"))
+        actions.append(("✅ 續抱", "保留", f"未觸發出場條件 報酬 {profit_pct:.1f}%（趨勢{ts_label}）"))
 
     # ===== 出場策略階梯（無論觸發與否，都計算給使用者參考）=====
     target_1r = round(entry_price + risk, 2) if risk > 0 else None
@@ -207,6 +232,8 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
         "移動停利(ATR)": round(chandelier, 2) if chandelier is not None else None,
         "時間停損日": time_stop_str,
         "技術轉弱觸發": f"K<D 且 收盤<MA20({ma20:.2f})",
+        "趨勢強度": ts_label,
+        "ADX": round(adx_v, 1) if adx_v is not None else None,
     }
 
     label, qty, note = actions[0]
@@ -214,8 +241,8 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     # ===== 持股期間主動警示（籌碼翻空 / 營收變臉 / 大盤·大資金轉空）=====
     alerts = _holding_alerts(chips, revenue, market_state)
     alert_str = " · ".join(alerts) if alerts else "—"
-    # 若目前判定「續抱」但出現警示 → 升級為「留意減碼」（讓利潤奔跑也要設防）
-    if alerts and label.startswith("✅ 續抱"):
+    # 若目前判定「續抱／強勢續抱」但出現警示 → 升級為「留意減碼」（讓利潤奔跑也要設防）
+    if alerts and ("續抱" in label) and qty == "保留":
         label = "⚠ 續抱·留意減碼"
         note = note + f"（警示：{alert_str}）"
 

@@ -387,9 +387,14 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
                 "說明": "市場未定位", "狀態": "找不到",
             })
             continue
+        hcfg = cfg.get("holdings", {})
         row = analyze_holding(
             r["symbol"], r["company_name"] or h["company_name"], r["market"],
             r["df"], h["entry_price"], h["entry_date"], shares_val,
+            time_stop_days=hcfg.get("time_stop_days", 10),
+            atr_trail_mult=hcfg.get("atr_trail_mult", 3.0),
+            let_winners_run=hcfg.get("let_winners_run", True),
+            strong_adx=hcfg.get("strong_adx", 25.0),
             chips=chips_map.get(h["code"]),
             revenue=revenue_map.get(h["code"]),
             market_state=market_state,

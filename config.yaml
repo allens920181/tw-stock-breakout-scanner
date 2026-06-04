@@ -129,6 +129,13 @@ sectors:
   heat_max: 3          # 同產業進場檔數上限；超過則每檔按 上限/檔數 比例降碼
   # 產業別來源：TWSE 上市公司基本資料
 
+# 持股出場管理
+holdings:
+  let_winners_run: true   # 達 +2R 時若趨勢仍強→強勢續抱（靠移動停利保護），避免砍掉暴漲股
+  strong_adx: 25.0        # ADX ≥ 此值視為趨勢強（強勢續抱門檻）
+  atr_trail_mult: 3.0     # Chandelier 移動停利 = 波段高 − ATR×此倍數
+  time_stop_days: 10      # 持有 N 日仍未達 +1R → 時間停損
+
 # 月營收動能（基本面催化劑：技術強是否有營收背書）
 revenue:
   enabled: true
