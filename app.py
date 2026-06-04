@@ -797,16 +797,15 @@ with st.sidebar:
             # 把 watchlist 內容轉成持股 DataFrame
             if "holdings_df" not in st.session_state:
                 st.session_state["holdings_df"] = pd.DataFrame(columns=[
-                    "股票代號", "公司名稱", "進場價", "進場日", "持有張數",
+                    "股票代號", "公司名稱", "成本價", "持有股數",
                 ])
             new_rows = []
             for w in st.session_state["watchlist"]:
                 new_rows.append({
                     "股票代號": w["code"],
                     "公司名稱": w.get("name", ""),
-                    "進場價": w.get("entry", 0.0),
-                    "進場日": pd.Timestamp(today_tw()),
-                    "持有張數": w.get("lots", 1),
+                    "成本價": w.get("entry", 0.0),
+                    "持有股數": int(w.get("lots", 1)) * 1000,
                 })
             new_df = pd.DataFrame(new_rows)
             st.session_state["holdings_df"] = pd.concat(
@@ -2006,6 +2005,25 @@ with tab2:
             {"股票代號": "2330", "公司名稱": "台積電", "成本價": 0.00,
              "持有股數": 1000},
         ])
+
+    # 正規化欄位：清掉任何來源殘留的舊欄位（進場日/進場價/持有張數），只留 4 個正規欄
+    def _normalize_holdings(_df):
+        _df = _df.copy()
+        if "進場價" in _df.columns and "成本價" not in _df.columns:
+            _df = _df.rename(columns={"進場價": "成本價"})
+        if "持有張數" in _df.columns and "持有股數" not in _df.columns:
+            _df["持有股數"] = pd.to_numeric(_df["持有張數"], errors="coerce") * 1000
+        keep = ["股票代號", "公司名稱", "成本價", "持有股數"]
+        for c in keep:
+            if c not in _df.columns:
+                _df[c] = None
+        return _df[keep]
+
+    _norm = _normalize_holdings(st.session_state["holdings_df"])
+    if list(_norm.columns) != list(st.session_state["holdings_df"].columns):
+        st.session_state["holdings_df"] = _norm   # 有殘留欄才覆寫，避免打斷編輯
+        st.session_state["holdings_editor_version"] = (
+            st.session_state.get("holdings_editor_version", 0) + 1)
 
     holdings_df_curr = st.session_state["holdings_df"]
     valid_h = holdings_df_curr.copy()

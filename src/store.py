@@ -160,11 +160,12 @@ def kv_set(owner, key, value):
 
 
 # ========== 持股（DataFrame <-> records）==========
-_HOLD_COLS = ["股票代號", "公司名稱", "進場價", "進場日", "持有張數"]
+# 欄位須與持股編輯器一致：股票代號 / 公司名稱 / 成本價 / 持有股數
+_HOLD_COLS = ["股票代號", "公司名稱", "成本價", "持有股數"]
 
 
 def holdings_to_records(df):
-    """DataFrame → list[dict]（進場日轉字串以利 JSON）。"""
+    """DataFrame → list[dict]。只保留持股編輯器的 4 個欄位。"""
     import pandas as pd
     if df is None or len(df) == 0:
         return []
@@ -183,7 +184,7 @@ def holdings_to_records(df):
 
 
 def records_to_holdings(records):
-    """list[dict] → DataFrame（進場日轉回 Timestamp）。"""
+    """list[dict] → DataFrame，只回 4 個正規欄位（多餘欄如舊『進場日』自動丟棄）。"""
     import pandas as pd
     if not records:
         return pd.DataFrame(columns=_HOLD_COLS)
@@ -191,10 +192,6 @@ def records_to_holdings(records):
     for c in _HOLD_COLS:
         if c not in df.columns:
             df[c] = None
-    try:
-        df["進場日"] = pd.to_datetime(df["進場日"], errors="coerce")
-    except Exception:
-        pass
     return df[_HOLD_COLS]
 
 

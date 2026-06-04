@@ -14,18 +14,24 @@ def test_disabled_by_default():
 
 def test_holdings_roundtrip():
     df = pd.DataFrame([
-        {"股票代號": "1904", "公司名稱": "正隆", "進場價": 20.1,
-         "進場日": pd.Timestamp("2026-05-20"), "持有張數": 1},
-        {"股票代號": "1608", "公司名稱": "華榮", "進場價": 36.38,
-         "進場日": pd.Timestamp("2026-05-25"), "持有張數": 2},
+        {"股票代號": "1904", "公司名稱": "正隆", "成本價": 20.1, "持有股數": 1000},
+        {"股票代號": "1608", "公司名稱": "華榮", "成本價": 36.38, "持有股數": 2000},
     ])
     recs = store.holdings_to_records(df)
-    assert recs[0]["進場日"] == "2026-05-20" and recs[0]["股票代號"] == "1904"
+    assert recs[0]["成本價"] == 20.1 and recs[0]["股票代號"] == "1904"
     back = store.records_to_holdings(recs)
-    assert list(back.columns) == store._HOLD_COLS
+    assert list(back.columns) == store._HOLD_COLS == ["股票代號", "公司名稱", "成本價", "持有股數"]
     assert len(back) == 2
-    assert str(back.iloc[1]["進場日"].date()) == "2026-05-25"
-    assert float(back.iloc[0]["進場價"]) == 20.1
+    assert int(back.iloc[1]["持有股數"]) == 2000
+
+
+def test_records_drop_legacy_columns():
+    """雲端舊資料含『進場日/進場價』→ 載回時自動丟棄，只留 4 正規欄。"""
+    recs = [{"股票代號": "2330", "公司名稱": "台積電", "成本價": 0,
+             "持有股數": 1000, "進場日": "2026-05-01", "進場價": 999}]
+    back = store.records_to_holdings(recs)
+    assert list(back.columns) == ["股票代號", "公司名稱", "成本價", "持有股數"]
+    assert "進場日" not in back.columns
 
 
 def test_empty_roundtrip():
