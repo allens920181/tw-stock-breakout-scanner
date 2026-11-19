@@ -12,6 +12,7 @@ uv run python scripts/strategy_study/download.py $S/cache $S/data2y.pkl        #
 uv run python scripts/strategy_study/study.py $S/data2y.pkl $S/cache $S/results.json      # 72 種變體
 uv run python scripts/strategy_study/baseline.py $S/data2y.pkl $S/cache scripts/strategy_study $S/baseline.json  # 對照：隨機進場
 uv run python scripts/strategy_study/rs_test.py $S/data2y.pkl $S/cache scripts/strategy_study $S/rs.json          # 單一假設：相對強度
+uv run python scripts/strategy_study/index_timing.py $S/index_timing.json   # 10 年大盤燈號擇時 vs 買進持有
 ```
 
 ## 方法

@@ -7,6 +7,7 @@ import html
 
 import streamlit as st
 
+from twscanner.analysis.goal import capital_for_target
 from twscanner.core.tz import today_tw
 from twscanner.portfolio.trade_log import compute
 from twscanner.services.today import build_today
@@ -64,6 +65,11 @@ def _goal_section(t):
                      "所以用近 3 個月平均來看目標。")
     lines.append(f"每筆最多賠 {fmt_money(plan['risk_amount'])}；本月虧損上限 {fmt_money(plan['loss_limit'])}"
                  f"（{plan['loss_limit_r']:.0f}R）。")
+    need = plan.get("required_annual_pct")
+    if need is not None:
+        lines.append(f"本金 {fmt_money(t['capital'])} 每月賺 {fmt_money(target)}，等於年報酬 {need:.0f}%。"
+                     f"對照：保守以年化 8% 推算，需要本金約 {fmt_money(capital_for_target(target, 0.08))}"
+                     "（詳見「策略驗證 → 大樣本實證」）。")
     st.markdown("\n".join(f"- {x}" for x in lines))
     if t["stats"]:
         s = t["stats"]

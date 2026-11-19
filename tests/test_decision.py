@@ -187,3 +187,10 @@ def test_build_today_gates():
     assert "還沒掃描" in t["headline"]
     t = build_today(None, _scan(), None, None, cfg, "2026-11")      # 大盤未知 → 不能說可以開倉
     assert not t["can_open"] and "大盤狀態" in t["reasons"][0]
+
+
+def test_capital_for_target():
+    from twscanner.analysis.goal import capital_for_target, plan
+    assert capital_for_target(10_000, 0.08) == 1_500_000
+    assert capital_for_target(10_000, 0) is None
+    assert plan(1_000_000, 0.01, 10_000)["required_annual_pct"] == 12

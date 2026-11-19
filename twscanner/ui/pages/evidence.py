@@ -1,9 +1,11 @@
 """大樣本實證：選股訊號有沒有比隨機進場好？（資料：docs/research/strategy_study_2026-11.json）"""
 import json
 
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from twscanner.analysis.goal import capital_for_target
 from twscanner.core.config import PROJECT_ROOT
 from twscanner.ui.components.blocks import conclusion
 from twscanner.ui.components.charts import plot
@@ -52,6 +54,39 @@ def _chart(data, period, title):
     plot(fig)
 
 
+def _index_section(data, target):
+    """十年大盤基準：有證據的報酬來源，以及「每月一萬」需要的本金。"""
+    it = data.get("index_timing")
+    if not it:
+        return
+    st.markdown("### 有十年證據的基準：大盤本身")
+    rows = []
+    for key, label in (("TWII", "加權"), ("00631L", "正2")):
+        for how, short in (("買進持有", "持有"), ("燈號擇時", "擇時")):
+            m = it[key][how]
+            rows.append({"方式": f"{label}·{short}", "年化%": m["年化"], "最大回撤%": m["最大回撤"],
+                         "最差月%": m["最差月"], "賺錢月%": m["月勝率"]})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
+                 column_config={c: st.column_config.NumberColumn(format="%.1f")
+                                for c in ("年化%", "最大回撤%", "最差月%")}
+                 | {"賺錢月%": st.column_config.NumberColumn(format="%.0f")})
+    tw = it["TWII"]
+    st.caption(f"加權＝加權指數，正2＝台灣50正2（兩倍槓桿 ETF）。{it['period']}。{it['rule']}。"
+               f"{it['note']}。成本已扣。")
+    st.markdown(
+        f"- **燈號擇時是風險工具，不是報酬工具。** 加權指數最大回撤由 {tw['買進持有']['最大回撤']:.0f}% 降到 "
+        f"{tw['燈號擇時']['最大回撤']:.0f}%，但年化報酬由 {tw['買進持有']['年化']:.0f}% 降到 "
+        f"{tw['燈號擇時']['年化']:.0f}%（常在反彈初期還沒進場）。\n"
+        "- **兩倍槓桿的回撤超過一半**，不適合拿來追固定月收入。\n"
+        "- 這十年台股大多頭，年化 16% 以上不能當成未來的預期；長期規劃用 6–10% 比較穩妥。")
+    caps = [(f"{r * 100:.0f}%", capital_for_target(target, r)) for r in (0.06, 0.08, 0.10, 0.12)]
+    st.markdown(f"**平均每月賺 {target:,.0f} 元，需要多少本金？**")
+    st.dataframe(pd.DataFrame([{"假設年報酬": a, "需要本金（元）": b} for a, b in caps]), hide_index=True,
+                 column_config={"需要本金（元）": st.column_config.NumberColumn(format="localized")})
+    st.caption("短線選股在上面的研究裡沒有證明能穩定超過大盤，所以本金不足時，"
+               "提高單筆風險或改用槓桿並不能讓目標變得可行，只會讓虧損月份更深。")
+
+
 def render():
     data = _load()
     if not data:
@@ -78,6 +113,7 @@ def render():
         "看「策略驗證 → 實戰績效」的期望值是否為正，再放大到正常部位。\n"
         "4. **評分當作「篩選清單」，不要當成「預測」。** 系統的條件能把明顯不該碰的股票（下跌趨勢、流動性差、"
         "財報地雷）排除掉，但在合格清單裡，排名第一和第十的表現沒有可靠差別。")
+    _index_section(data, float(st.session_state.get("month_target", 10_000)))
     with st.expander("研究方法與重跑方式"):
         st.markdown(
             "- 對每一種策略，都用同樣的品質過濾、大盤閘門與出場規則，另做一組「隨機進場、頻率相同」的對照組。"

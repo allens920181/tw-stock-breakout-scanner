@@ -15,6 +15,13 @@ def risk_amount(capital, risk_pct):
     return float(capital) * float(risk_pct)
 
 
+def capital_for_target(target_month, annual_return):
+    """以年報酬率（0.08 = 8%）推算：平均每月賺 target_month 需要多少本金。"""
+    if not annual_return or annual_return <= 0:
+        return None
+    return float(target_month) * 12 / float(annual_return)
+
+
 def trades_needed(target, capital, risk_pct, expectancy_r):
     """達到月目標平均需要幾筆交易；期望值 ≤ 0 時無解（回 None）。"""
     r_amt = risk_amount(capital, risk_pct)
@@ -54,6 +61,7 @@ def plan(capital, risk_pct, target, stats=None, loss_limit_r=2.0, max_trades=8):
         "loss_limit": r_amt * loss_limit_r,
         "loss_limit_r": loss_limit_r,
         "required_return_pct": target / capital * 100 if capital else None,
+        "required_annual_pct": target * 12 / capital * 100 if capital else None,
         "trades_needed": None, "sim": None, "status": "unknown", "verdict": "",
     }
     if not stats or stats.get("expectancy_r") is None:
