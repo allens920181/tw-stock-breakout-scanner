@@ -25,7 +25,7 @@ from twscanner.ui.components.charts import (
     render_monthly_returns,
 )
 from twscanner.ui.components.common import fmt_int, make_progress_block
-from twscanner.ui.format import colors, strip_icon
+from twscanner.ui.format import clean_stock_col, colors, strip_icon
 from twscanner.ui.glossary import HELP
 from twscanner.ui.settings import apply_and_rescan, build_cfg
 from twscanner.ui.state import get_base_config, persist_calibration_date
@@ -202,13 +202,13 @@ def render(sb):
             with tcol1:
                 st.markdown("### 表現最好的 10 檔")
                 st.dataframe(
-                    bt["by_symbol"].head(10),
+                    clean_stock_col(bt["by_symbol"].head(10)),
                     use_container_width=True, hide_index=True,
                 )
             with tcol2:
                 st.markdown("### 表現最差的 10 檔")
                 st.dataframe(
-                    bt["by_symbol"].tail(10).sort_values("期望值R"),
+                    clean_stock_col(bt["by_symbol"].tail(10).sort_values("期望值R")),
                     use_container_width=True, hide_index=True,
                 )
 

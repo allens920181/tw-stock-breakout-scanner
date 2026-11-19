@@ -180,6 +180,16 @@ button[kind="secondary"]:hover { border-color: var(--subtle) !important; backgro
 [data-testid="stDataFrame"] { border: 1px solid var(--border) !important; border-radius: 6px; }
 [data-testid="stProgress"] > div > div > div { background-color: var(--primary) !important; }
 [data-testid="stExpander"] details summary p { font-weight: 500; }
+/* Streamlit 提示框改用狀態色：紅綠只留給漲跌方向 */
+[data-testid="stAlertContainer"] { border-radius: 6px !important; }
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"]) { background: #FFF1EB !important; border-left: 4px solid var(--critical) !important; }
+[data-testid="stAlertContentError"], [data-testid="stAlertContentError"] * { color: var(--critical) !important; }
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) { background: var(--caution-bg) !important; border-left: 4px solid var(--caution) !important; }
+[data-testid="stAlertContentWarning"], [data-testid="stAlertContentWarning"] * { color: var(--caution-text) !important; }
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]),
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentInfo"]) { background: var(--info-bg) !important; border-left: 4px solid var(--info) !important; }
+[data-testid="stAlertContentSuccess"], [data-testid="stAlertContentSuccess"] *,
+[data-testid="stAlertContentInfo"], [data-testid="stAlertContentInfo"] * { color: var(--info-text) !important; }
 .watch-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .watch-chip { background: var(--primary-2); color: var(--primary); padding: 4px 10px; border-radius: 12px; font-size: 0.78rem; font-family: 'JetBrains Mono', monospace; }
 

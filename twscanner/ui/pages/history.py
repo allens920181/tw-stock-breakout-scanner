@@ -6,6 +6,7 @@ import streamlit as st
 from twscanner.services import run_evaluate_journal
 from twscanner.storage import cloud as store
 from twscanner.storage.history import list_scans, load_scan_df
+from twscanner.ui.format import clean_stock_col
 from twscanner.ui.settings import build_cfg
 from twscanner.ui.state import cloud_owner
 
@@ -60,7 +61,7 @@ def render():
                 "掃描日", "股票", "公司名稱", "模式", "綜合評級", "狀態",
                 "實際R", "最佳R", "最差R", "持有天數", "出場日",
                 "進場參考價", "停損價", "相對強度RS%"] if c in jdf.columns]
-            st.dataframe(jdf[view_cols].sort_values("掃描日", ascending=False),
+            st.dataframe(clean_stock_col(jdf[view_cols].sort_values("掃描日", ascending=False)),
                          use_container_width=True, hide_index=True)
     st.divider()
 

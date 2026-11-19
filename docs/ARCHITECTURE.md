@@ -10,27 +10,29 @@ main.py                CLI 入口（5 行）
 config.yaml            所有策略 / 資料 / 輸出參數（唯一的參數來源）
 twscanner/
 ├── core/              基礎設施：設定載入、當日快取、台灣時區
-├── data/              外部資料來源（只抓 + 解析）：價格、清單、法人、融資、營收、財報、產業、名稱
-├── analysis/          純計算（無 I/O）：技術指標、進場分類、部位計算、統計檢定
+├── data/              外部資料來源（只抓 + 解析）：價格、清單、法人、融資、營收、財報、財務報表、產業、名稱
+├── analysis/          純計算（無 I/O）：技術指標、進場分類、部位、統計檢定、財報健檢、月目標
 ├── strategy/          選股策略：強勢/早期突破評分、潛伏模式、族群強勢/熱度
 ├── market/            市場層級判斷：台股大盤、美股風險、大資金、資金流向
-├── portfolio/         持股出場建議、訊號日誌
+├── portfolio/         持股出場建議、訊號日誌、已實現交易紀錄、組合風險
 ├── research/          回測、因子驗證、敏感度、自適應參數
-├── storage/           持久化：雲端（Neon）、掃描歷史、使用者偏好
+├── storage/           持久化：雲端（Neon）、掃描歷史、使用者偏好、交易紀錄（僅雲端）
 ├── reporting/         輸出：Excel 報告、K 線圖
-├── services/          應用流程（use cases）：掃描、單檔查詢、持股分析、研究 —— GUI 與 CLI 共用
+├── services/          應用流程：掃描、單檔健檢、持股分析、研究、今日決策 —— GUI 與 CLI 共用
 ├── ui/                Streamlit 介面
-│   ├── app.py         外殼：頁面設定 → 樣式 → 狀態 → 頁首 → 側欄 → 分頁（PAGES 註冊表）
-│   ├── state.py       快取載入、雲端/偏好 bootstrap、session 初始化
+│   ├── app.py         外殼：頁面設定 → 狀態 → 樣式 → 側欄 → 頁首 → 分頁（PAGES 註冊表、錯誤隔離）
+│   ├── state.py       快取載入、雲端/偏好 bootstrap、持股與交易紀錄的 session 存取
 │   ├── settings.py    側欄設定 → 掃描 cfg（build_run_config 為純函式）
+│   ├── actions.py     跨頁共用的動作：執行掃描、分析持股、用快取重算
+│   ├── format.py      數字格式與漲跌色（紅漲綠跌 / 綠漲紅跌）—— 全站唯一來源
 │   ├── sidebar.py     側欄 UI，回傳 SidebarState
-│   ├── theme.py       CSS 與色票
-│   ├── glossary.py    名詞說明（help tooltip）
-│   ├── components/    頁首、圖表、進度條等共用元件
-│   └── pages/         每個分頁一個模組，提供 render()
+│   ├── theme.py       CSS token 與樣式
+│   ├── glossary.py    名詞說明（help tooltip 與學習中心名詞表共用）
+│   ├── components/    blocks（結論句、KPI、徽章、交易計畫卡、空狀態）、頁首、圖表
+│   └── pages/         today / scan / lookup / holdings / flows / learn / research（+ backtest、history 子頁）
 └── cli.py             命令列介面
 tests/                 單元測試 + 架構守門測試（test_architecture.py）
-docs/                  架構、部署、雲端設定、判讀指南
+docs/                  架構、設計規範、部署、雲端設定、判讀指南
 ```
 
 ## 二、分層規則（由 `tests/test_architecture.py` 自動檢查）
@@ -93,7 +95,7 @@ strategy  market
 
 ### 新增一個分頁
 
-1. `twscanner/ui/pages/<name>.py`，提供 `render()`；若需要「資料來源 / 開始掃描」等側欄互動結果，改成 `render(sb)`。
+1. `twscanner/ui/pages/<name>.py`，提供 `render()`；版面照 [DESIGN.md](DESIGN.md)：結論句 → KPI → 主體 → 進階；若需要「資料來源 / 開始掃描」等側欄互動結果，改成 `render(sb)`。
 2. 在 `twscanner/ui/app.py` 的 `PAGES` 加一行 `(標題, 模組, 是否需要 SidebarState)`。
 3. 重的運算放在 `services/` 或 `market/`，並在頁面用 `st.cache_data` 包住。Streamlit 每次互動都會重跑所有分頁，避免在 `render()` 裡直接抓網路資料。
 
@@ -132,5 +134,6 @@ uv export --no-dev --no-hashes --format requirements-txt -o requirements.txt
 | 資金流向的 TWSE 歷史 | `.cache/flows_twse_hist.json` | 依日期永久累積（最多 200 筆） |
 | 掃描歷史 | `.cache/scans/` | 保留最近 30 次 |
 | 使用者偏好 | `~/.tw_scanner_prefs.json` | 永久（雲端部署重啟會清空） |
-| 持股 / 訊號日誌（雲端） | Neon `tw_kv` 表 | 永久，見 [雲端設定](雲端設定.md) |
+| 持股 / 訊號日誌 / 交易紀錄（雲端） | Neon `tw_kv` 表 | 永久，見 [雲端設定](雲端設定.md) |
+| 交易紀錄（未登入） | `st.session_state` | 只在該瀏覽器分頁；刻意不寫伺服器檔案（公開部署會被其他訪客看到） |
 | UI 狀態 | `st.session_state` | 單一瀏覽器 session |
