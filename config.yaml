@@ -158,6 +158,7 @@ earnings:
 
 # 回測樣本外驗證（walk-forward IS/OOS）
 backtest:
+  live_rules: true         # 只回測實盤會下單的情況：大盤空頭不進場、品質過濾、停損距離 ≥ 下限、跳空以開盤價停損
   oos_enabled: true
   oos_ratio: 0.3           # 後 30% 進場日為樣本外 OOS
   oos_mode: "ratio"        # ratio=單切 / rolling=滾動分折

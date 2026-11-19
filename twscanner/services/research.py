@@ -20,6 +20,21 @@ from twscanner.research.sensitivity import detect_plateau, plateau_scan, sensiti
 log = logging.getLogger(__name__)
 
 
+def live_rules_from_cfg(cfg):
+    """回測照實盤會下單的條件：空頭不進場、品質過濾、停損距離下限、跳空以開盤價停損。"""
+    if not cfg.get("backtest", {}).get("live_rules", True):
+        return None
+    f = cfg.get("filters", {})
+    return {
+        "blocked_regimes": {"bear"} if cfg.get("market_filter", {}).get("enabled", True) else set(),
+        "min_price": f.get("min_price", 0),
+        "min_avg_volume": f.get("min_avg_volume", 0),
+        "require_ma60": f.get("require_above_ma60", False),
+        "min_risk_pct": f.get("min_risk_pct", 0),
+        "gap_fill": True,
+    }
+
+
 def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
                  min_score=None, items=None, progress_cb=None,
                  oos_ratio=None, oos_mode=None):
@@ -51,8 +66,9 @@ def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
     if min_score is None:
         min_score = cfg["scoring"]["thresholds"]["strong"]
 
+    live_rules = live_rules_from_cfg(cfg)
     regime_map = None
-    if cfg.get("backtest", {}).get("regime_split", {}).get("enabled", True):
+    if cfg.get("backtest", {}).get("regime_split", {}).get("enabled", True) or live_rules:
         from twscanner.market.tw_regime import build_regime_map
         try:
             regime_map = build_regime_map(cfg["data"]["period"], cfg["data"]["cache_dir"])
@@ -69,7 +85,7 @@ def run_backtest(input_path, cfg, lookback_days=120, hold_days=10,
             trades = backtest_symbol(
                 r["df"], weights, min_score,
                 hold_days=hold_days, lookback=lookback_days, costs=costs,
-                regime_map=regime_map,
+                regime_map=regime_map, live_rules=live_rules,
             )
             for t in trades:
                 t["股票"] = r["symbol"]

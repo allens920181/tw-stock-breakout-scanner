@@ -82,6 +82,25 @@ def _signal_score_for_bar(sub, weights, stop_mode="ma", atr_mult=None):
     return score, entry, stop
 
 
+def _passes_live_rules(df, i, entry, stop, regime_map, rules):
+    """live_rules 的進場前檢查；只用第 i 根（含）以前的資料，不偷看未來。"""
+    if not rules:
+        return True
+    blocked = rules.get("blocked_regimes")
+    if blocked and _regime_at(regime_map, str(df.index[i].date())) in blocked:
+        return False
+    if entry < rules.get("min_price", 0):
+        return False
+    vol20 = df["Volume"].iloc[max(0, i - 19): i + 1].mean()
+    if vol20 < rules.get("min_avg_volume", 0):
+        return False
+    if rules.get("require_ma60") and not entry > float(df["MA60"].iloc[i]):
+        return False
+    if (entry - stop) / entry < rules.get("min_risk_pct", 0):
+        return False
+    return True
+
+
 def _regime_at(regime_map, entry_date_str):
     """用 entry_date（字串）對 regime_map（Series）做 asof 取值；無則 'unknown'。"""
     if regime_map is None or len(regime_map) == 0:
@@ -96,13 +115,17 @@ def _regime_at(regime_map, entry_date_str):
 
 
 def backtest_symbol(df, weights, min_score, hold_days=10, lookback=120, costs=None,
-                    regime_map=None, stop_mode="ma", atr_mult=None, tp_mult=2.0):
+                    regime_map=None, stop_mode="ma", atr_mult=None, tp_mult=2.0,
+                    live_rules=None):
     """
     對單一股票回測。回傳 list[trade dict]
     costs: dict（含 enabled/fee_rate/tax_rate/fee_discount）或 None=不計成本（向後相容）
     regime_map: pandas.Series（date→regime）或 None；標記每筆 trade['regime']
     stop_mode: 'ma'（預設，等價現行 max(MA20,low10)）或 'atr'（entry-ATR×atr_mult）
     tp_mult: 停利倍數（target = entry + tp_mult×risk），預設 2.0 等價現行 +2R
+    live_rules: dict 或 None。給了就照實盤會下單的條件回測（預設 None = 舊行為，向後相容）：
+      blocked_regimes（如 {"bear"}，大盤空頭不進場）、min_price、min_avg_volume、require_ma60、
+      min_risk_pct（停損距離下限）、gap_fill（跳空跌破停損以開盤價成交）
 
     trade dict:
       entry_date, entry_price, exit_date, exit_price, exit_reason, return_pct, r_multiple, held_days
@@ -122,7 +145,8 @@ def backtest_symbol(df, weights, min_score, hold_days=10, lookback=120, costs=No
         sub = _slice_until(df, i)
         score, entry, stop = _signal_score_for_bar(sub, weights, stop_mode, atr_mult)
 
-        if score >= min_score and stop is not None and entry > stop:
+        if (score >= min_score and stop is not None and entry > stop
+                and _passes_live_rules(df, i, entry, stop, regime_map, live_rules)):
             risk = entry - stop
             target_2r = entry + tp_mult * risk
 
@@ -137,7 +161,9 @@ def backtest_symbol(df, weights, min_score, hold_days=10, lookback=120, costs=No
 
                 if low <= stop:
                     exit_idx = j
-                    exit_price = stop
+                    # 實盤：開盤就跳空跌破停損時，只能用開盤價賣出
+                    gap = live_rules and live_rules.get("gap_fill", True)
+                    exit_price = min(float(bar["Open"]), stop) if gap else stop
                     exit_reason = "停損"
                     break
                 if high >= target_2r:
