@@ -1,6 +1,6 @@
 [project]
 name = "tw-stock-breakout-scanner"
-version = "0.2.0"
+version = "0.5.0"
 description = "台股強勢突破交易清單掃描器（換手率版）"
 requires-python = ">=3.10"
 dependencies = [

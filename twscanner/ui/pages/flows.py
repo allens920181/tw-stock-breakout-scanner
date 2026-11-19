@@ -445,3 +445,8 @@ def render_flows_tab(cache_dir=".cache", tw_days=20):
         _render_link(us)
     with t_help:
         st.markdown(_GUIDE)
+
+
+def render():
+    from twscanner.ui.state import get_base_config
+    render_flows_tab(get_base_config()["data"]["cache_dir"])
