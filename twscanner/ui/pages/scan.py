@@ -113,8 +113,9 @@ def _table(df):
         if c in view:
             view[c] = pd.to_numeric(view[c], errors="coerce")       # None → 空白，不顯示「None」
     for c in view.columns:
-        if view[c].dtype == object:
-            view[c] = view[c].where(view[c].notna() & (view[c].astype(str) != "None"), "—")
+        if c not in NUM_FMT:      # pandas 3 的字串欄是 str dtype（不是 object），逐值判斷最穩
+            view[c] = view[c].map(lambda v: "—" if v is None or (isinstance(v, float) and v != v)
+                                  or str(v) in ("None", "nan", "") else v)
     cfg = {c: st.column_config.NumberColumn(c, format=f) for c, f in NUM_FMT.items() if c in view}
     cfg["股票"] = st.column_config.TextColumn("股票", pinned=True)
     event = st.dataframe(_style(view), hide_index=True, use_container_width=True,
@@ -229,7 +230,7 @@ def render(sb):
 
     if "result" not in st.session_state:
         conclusion("還沒有掃描結果",
-                   "三步驟：① 側欄選資料來源（上傳清單或全台股）與策略模式 → ② 按「開始掃描」"
+                   "三步驟：① 側欄（手機請點左上角「›」）選資料來源與策略模式 → ② 按「開始掃描」"
                    "→ ③ 點結果表的一列，看入選理由與交易計畫；買進後按「我已買進」記入持股。", "info")
         if st.button("用目前設定開始掃描", type="primary"):
             execute_scan(sb)

@@ -142,7 +142,8 @@ def render(sb):
     # 2. 候選
     st.markdown("### 2. 今日候選")
     if scan_df is None:
-        empty("今天還沒掃描", "依側欄的資料來源與策略模式掃描（全台股首次約 5–15 分鐘，同日重跑不到 1 分鐘）。")
+        empty("今天還沒掃描", "依側欄的資料來源與策略模式掃描（全台股首次約 5–15 分鐘，同日重跑不到 1 分鐘）。"
+              "手機上請點左上角「›」打開側欄。")
         if st.button("開始掃描", type="primary", key="today_scan"):
             execute_scan(sb)
             st.rerun()

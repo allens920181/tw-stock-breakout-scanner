@@ -7,9 +7,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from twscanner.analysis.goal import simulate_months, trades_needed
+from twscanner.ui.components.charts import plot
 from twscanner.ui.format import colors, fmt_money
 from twscanner.ui.glossary import HELP
-from twscanner.ui.theme import CHART_CONFIG
 
 
 def _lesson(title, body, example=None):
@@ -21,7 +21,7 @@ def _lesson(title, body, example=None):
 # ---------------------------------------------------------------
 def _philosophy():
     st.markdown("## 交易哲學：這套系統相信什麼")
-    st.caption("先讀這一頁。後面所有規則（停損、時間停損、月虧損上限、空頭休息）都是從這五個信念推出來的。")
+    st.caption("先讀這一頁。後面所有規則（停損、時間停損、月虧損上限、空頭休息）都是從這些信念推出來的。")
     _lesson("1. 風險先於報酬",
             "每一筆交易下單前，先決定「錯了最多賠多少」，再決定買多少。報酬是市場給的，風險是你自己控制的。",
             "總資金 100 萬、單筆風險 1%：這筆最多賠 1 萬。進場 100 元、停損 95 元，每股風險 5 元，"
@@ -41,6 +41,11 @@ def _philosophy():
     _lesson("5. 目標是結果，不是手段",
             "「每月賺一萬」是用來推算要做幾筆、該用多少資金，不能拿來推高風險。"
             "月底還沒達標就加碼、放寬停損，是散戶最常見的爆倉路徑。")
+
+    _lesson("6. 用證據檢查自己的方法",
+            "2026 年 11 月用 1,034 檔上市股、兩年資料做的實證：系統的突破訊號、相對強度挑股，都沒有比「在同樣條件下隨機挑股」更好。"
+            "前 15 個月連隨機挑都賺，最近 6 個月沒有任何一種方法有顯著獲利。代表賺錢的關鍵是大盤環境與風險控制，不是挑中哪一檔。"
+            "詳見「策略驗證 → 大樣本實證」。")
 
     st.markdown("### 你的月目標，用數字算一次")
     c1, c2, c3 = st.columns(3)
@@ -152,7 +157,7 @@ def _income_chart():
                       paper_bgcolor="#FFFFFF", showlegend=False, yaxis=dict(visible=False),
                       title=dict(text="每賣 100 元，最後剩多少：一家公司的損益表（示意）", font=dict(size=14)),
                       font=dict(family="Inter, Noto Sans TC, sans-serif", size=12))
-    st.plotly_chart(fig, use_container_width=True, config=CHART_CONFIG)
+    plot(fig)
 
 
 def _financials():

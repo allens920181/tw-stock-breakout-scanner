@@ -61,7 +61,15 @@
 - **`st.cache_data` 會快取「抓不到」的結果**；暫時失敗時丟例外（`state._NotReady`），不要回傳 unknown。
 - **公開部署時伺服器檔案是所有訪客共用的**：個人資料（持股、交易）只放 session 或登入後的雲端。
 
-## 6. 驗收
+## 6. 手機版（iPhone 寬度 390px）
+
+- 側欄在手機預設收合，**左上角「›」是唯一入口**：不可用 CSS 隱藏 `stToolbar`（展開鈕在裡面；`tests/test_ui_theme.py` 把關）。需要側欄的功能，頁內文案要提示「手機請點左上角 ›」。
+- `st.columns` 在 640px 以下會疊成一欄：KPI 用 `kpi_row`（CSS grid，手機自動 2×2），不要用 `st.columns` 排數字卡；按鈕列控制在 2 顆，其餘收進 popover。
+- 分頁列不換行、可橫向滑動（換行時 BaseWeb 的選取底線會畫在錯的分頁下）。
+- 圖表用 `components.charts.plot(fig)`：標題移到圖外才會換行；圖內文字與座標軸標題要短。
+- 驗收時用 Playwright 的 `devices['iPhone 13']` 跑完整流程，並檢查 `scrollWidth <= innerWidth`（不得橫向捲動）。
+
+## 7. 驗收
 
 改完 UI，合併前逐項確認：
 

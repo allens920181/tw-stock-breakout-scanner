@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from twscanner.market import flows as F
+from twscanner.ui.components.charts import plot
 from twscanner.ui.format import colors
 
 # 與 app.py 一致的色票
@@ -41,7 +42,7 @@ def _tbl_h(n):
 
 
 def _plot(fig):
-    st.plotly_chart(fig, use_container_width=True, config=_CFG)
+    plot(fig)
 
 
 # ---------------------------------------------------------------

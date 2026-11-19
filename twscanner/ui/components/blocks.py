@@ -26,12 +26,12 @@ def conclusion(lead, sub=None, tone="info"):
 def kpi_row(items):
     """items: [(label, value, sub)]，最多 4 個；value 可含 HTML（已格式化的數字）。"""
     items = list(items)[:4]
-    cols = st.columns(len(items))
-    for col, (label, value, sub) in zip(cols, items):
-        col.markdown(f"<div class='kpi'><div class='label'>{_e(label)}</div>"
-                     f"<div class='value'>{value}</div>"
-                     + (f"<div class='sub'>{sub}</div>" if sub else "") + "</div>",
-                     unsafe_allow_html=True)
+    cells = "".join(
+        f"<div class='kpi'><div class='label'>{_e(label)}</div><div class='value'>{value}</div>"
+        + (f"<div class='sub'>{sub}</div>" if sub else "") + "</div>"
+        for label, value, sub in items)
+    # 單一 grid：桌機一列 N 個、手機 2×2（st.columns 在手機會疊成一長串）
+    st.markdown(f"<div class='kpi-grid' style='--n:{len(items)}'>{cells}</div>", unsafe_allow_html=True)
 
 
 def grade_badge(grade):

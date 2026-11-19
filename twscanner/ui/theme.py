@@ -43,7 +43,9 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
     font-feature-settings: 'liga';
 }
 
-#MainMenu, footer, [data-testid="stToolbar"] { visibility: hidden; height: 0; }
+#MainMenu, footer { visibility: hidden; height: 0; }
+/* 不要隱藏 stToolbar：側欄「展開」按鈕在它裡面，手機上側欄預設收合，藏了就打不開。Deploy 由 config 的 toolbarMode=minimal 處理 */
+[data-testid="stExpandSidebarButton"] { visibility: visible !important; }
 [data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1320px; }
 
@@ -118,7 +120,8 @@ h4 { font-weight: 600 !important; font-size: 0.875rem !important; color: var(--m
 [data-testid="stMetricValue"] { font-size: 1.5rem !important; font-weight: 600 !important; }
 [data-testid="stMetricValue"] > div { overflow: visible !important; white-space: normal !important; }
 [data-testid="stMetricDelta"] { font-size: 0.78rem !important; }
-.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; height: 100%; }
+.kpi-grid { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 12px; margin: 4px 0 12px 0; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; min-width: 0; }
 .kpi .label { color: var(--muted); font-size: 0.78rem; font-weight: 500; }
 .kpi .value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .kpi .sub { color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
@@ -164,7 +167,10 @@ h4 { font-weight: 600 !important; font-size: 0.875rem !important; color: var(--m
 .callout.info { border-left-color: var(--info); background: var(--info-bg); color: var(--info-text); }
 
 /* ===== Streamlit 元件 ===== */
-.stTabs [data-baseweb="tab-list"] { gap: 2px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.stTabs [data-baseweb="tab-list"] { gap: 2px; border-bottom: 1px solid var(--border); flex-wrap: nowrap;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+.stTabs [data-baseweb="tab"] { flex: 0 0 auto; }
 .stTabs [data-baseweb="tab"] { font-size: 0.92rem !important; font-weight: 500 !important; padding: 8px 12px !important; color: var(--muted) !important; }
 .stTabs [aria-selected="true"] { color: var(--text) !important; font-weight: 700 !important; }
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
@@ -195,7 +201,17 @@ button[kind="secondary"]:hover { border-color: var(--subtle) !important; backgro
 
 /* ===== 手機 ===== */
 @media (max-width: 640px) {
-    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .block-container { padding-left: 1rem; padding-right: 1rem; padding-top: 3rem; }   /* 留位置給左上角的側欄展開鈕 */
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .kpi { padding: 10px 12px; }
+    .stTabs [data-baseweb="tab"] { padding: 8px 10px !important; font-size: 0.88rem !important; }
+    .app-title { font-size: 1.1rem; }
+    .hdr-status { font-size: 0.78rem; padding: 3px 8px; }
+    .hdr-advice { font-size: 0.82rem; padding: 8px 10px; }
+    .conclusion { padding: 12px 14px; }
+    .plan { padding: 12px; }
+    .rowline { gap: 8px; }
+    .health-v { width: 52px; flex-basis: 52px; }
     .hdr-right { align-items: flex-start; }
     .plan .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .conclusion .lead { font-size: 1rem; }

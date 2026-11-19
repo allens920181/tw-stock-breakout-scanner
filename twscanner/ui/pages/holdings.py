@@ -161,18 +161,22 @@ def _sell_form(r):
 
 
 def _toolbar():
-    t1, t2, t3, t4 = st.columns(4)
-    if t1.button("清空", use_container_width=True):
-        st.session_state["holdings_df"] = pd.DataFrame(columns=HOLD_COLS).astype({"股票代號": str})
-        st.session_state.pop("holdings_result", None)
-        _bump()
-        st.rerun()
+    t2, t3 = st.columns(2)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         st.session_state["holdings_df"].to_excel(w, sheet_name="持股", index=False)
-    t2.download_button("匯出", data=buf.getvalue(), file_name="my_holdings.xlsx", use_container_width=True,
+    t2.download_button("匯出持股", data=buf.getvalue(), file_name="my_holdings.xlsx", use_container_width=True,
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    with t3.popover("上傳", use_container_width=True):
+    with t3.popover("匯入 / 範本 / 清空", use_container_width=True):
+        st.download_button("下載空白範本", data=make_holdings_template(), file_name="持股_模板.xlsx",
+                           use_container_width=True,
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        if st.button("清空全部持股", use_container_width=True):
+            st.session_state["holdings_df"] = pd.DataFrame(columns=HOLD_COLS).astype({"股票代號": str})
+            st.session_state.pop("holdings_result", None)
+            _bump()
+            st.rerun()
+        st.caption("上傳 xlsx（會取代目前持股）")
         up = st.file_uploader("上傳 xlsx 覆蓋", type=["xlsx"], key="holdings_uploader",
                               label_visibility="collapsed")
         if up:
@@ -183,9 +187,6 @@ def _toolbar():
                 st.success(f"已載入 {len(st.session_state['holdings_df'])} 筆")
             except Exception as e:
                 st.error(f"讀取失敗：{e}")
-    t4.download_button("下載模板", data=make_holdings_template(), file_name="持股_模板.xlsx",
-                       use_container_width=True,
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 def _editor(etf_map):

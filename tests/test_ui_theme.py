@@ -24,3 +24,10 @@ def test_strip_icon_keeps_chinese():
     assert strip_icon("✅ 續抱") == "續抱"
     assert strip_icon("🟢 達 +1R 半倉鎖利") == "達 +1R 半倉鎖利"
     assert strip_icon("⚠ 續抱·留意減碼") == "續抱·留意減碼"
+
+
+def test_sidebar_toggle_not_hidden():
+    """手機側欄預設收合：工具列（含展開側欄按鈕）不能被 CSS 藏起來。"""
+    import re
+    hidden_rules = re.findall(r"([^{}]+)\{[^}]*visibility:\s*hidden", CSS)
+    assert not any("stToolbar" in sel or "stExpandSidebarButton" in sel for sel in hidden_rules)

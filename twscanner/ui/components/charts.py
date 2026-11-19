@@ -123,3 +123,15 @@ def render_monthly_returns(trades):
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def plot(fig):
+    """
+    顯示 Plotly 圖：把圖內標題移到圖外（Markdown 會自動換行；Plotly 標題不換行，手機上會被截斷）。
+    """
+    title = fig.layout.title.text if fig.layout.title and fig.layout.title.text else None
+    if title:
+        fig.update_layout(title_text="", margin=dict(t=12))
+        st.markdown(f"<div style='font-weight:600;font-size:0.92rem;margin:8px 0 2px 0'>{title}</div>",
+                    unsafe_allow_html=True)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
