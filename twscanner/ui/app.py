@@ -9,32 +9,32 @@ import streamlit as st
 from twscanner import __version__
 from twscanner.ui import state
 from twscanner.ui.components.header import render_market_header
-from twscanner.ui.pages import backtest, flows, guide, history, holdings, lookup, scan
+from twscanner.ui.pages import flows, holdings, learn, lookup, research, scan, today
 from twscanner.ui.sidebar import render_sidebar
 from twscanner.ui.theme import inject_css
 
-# (分頁標題, 模組, 是否需要 SidebarState)；順序 = 畫面上的分頁順序
+# (分頁標題, 模組, 是否需要 SidebarState)；順序 = 每天的操作順序，需要時才看的放後面
 PAGES = [
-    ("📈 買入掃描", scan, True),
-    ("🔎 個股查詢", lookup, False),
-    ("💰 資金流向", flows, False),
-    ("💼 持股管理", holdings, False),
-    ("🧪 回測", backtest, True),
-    ("🕘 歷史", history, False),
-    ("📖 操作教學", guide, False),
+    ("今日決策", today, True),
+    ("找標的", scan, True),
+    ("個股健檢", lookup, False),
+    ("持股與紀錄", holdings, False),
+    ("資金流向", flows, False),
+    ("學習中心", learn, False),
+    ("策略驗證", research, True),
 ]
 
 
 def main():
     st.set_page_config(
-        page_title="台股強勢突破掃描器",
+        page_title="台股波段決策系統",
         page_icon="·",
         layout="wide",
-        initial_sidebar_state="expanded",
-        menu_items={"About": f"**台股強勢突破掃描器** v{__version__}"},
+        initial_sidebar_state="auto",   # 桌機展開、手機收合
+        menu_items={"About": f"**台股波段決策系統** v{__version__}"},
     )
+    state.bootstrap()        # 先載入偏好（漲跌顏色），樣式才拿得到正確的 --up / --down
     inject_css()
-    state.bootstrap()
 
     # 側欄先渲染（widget 值寫入 session_state，build_cfg 才讀得到），頁首在主區最上方
     sb = render_sidebar()

@@ -11,3 +11,6 @@ headless = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"   # 隱藏 Deploy 等開發者按鈕

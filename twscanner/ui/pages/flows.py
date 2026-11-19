@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-「💰 資金流向」分頁的 Streamlit 視覺化。資料/計算都在 twscanner/market/flows.py。
+「資金流向」分頁的 Streamlit 視覺化。資料/計算都在 twscanner/market/flows.py。
 
 Streamlit 每次互動都會重跑所有分頁 → 重的抓取全部包在 st.cache_data，
 且第一次需使用者按鈕才開始載入（台股歷史首次約 1~2 分鐘）。
@@ -11,13 +11,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from twscanner.market import flows as F
+from twscanner.ui.format import colors
 
 # 與 app.py 一致的色票
-_POS, _NEG, _MUTED, _GRID, _TEXT = "#059669", "#DC2626", "#94A3B8", "#F1F5F9", "#0F172A"
+_MUTED, _GRID, _TEXT = "#94A3B8", "#F1F5F9", "#0F172A"
 # 類別色（依固定順序，不輪替）：外資 / 投信 / 自營商 / 第 4 條線
 _CAT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
-_QUAD_COLOR = {"leading": "#059669", "improving": "#2a78d6",
-               "weakening": "#D97706", "lagging": "#DC2626"}
+def _quad_color():
+    """RRG 象限色跟本站語意走：領先 = 偏多色、落後 = 偏空色、轉弱 = 注意、改善 = 資訊（與 StockCharts 刻意不同）。"""
+    c = colors()
+    return {"leading": c["up"], "improving": c["info"], "weakening": c["caution"], "lagging": c["down"]}
 _CFG = {"displayModeBar": False}
 
 
@@ -76,6 +79,7 @@ def _load_tw(cache_dir, days):
 # 美股
 # ---------------------------------------------------------------
 def _rrg_chart(tails, table, title):
+    qc = _quad_color()
     fig = go.Figure()
     allx, ally = [100], [100]
     for sym, df in tails.items():
@@ -91,17 +95,17 @@ def _rrg_chart(tails, table, title):
              ("improving", x0, 100, 100, y1, "改善：開始流入", "left", "top")]
     for q, xa, xb, ya, yb, lab, xan, yan in quads:
         fig.add_shape(type="rect", x0=xa, x1=xb, y0=ya, y1=yb, layer="below",
-                      line_width=0, fillcolor=_QUAD_COLOR[q], opacity=0.06)
+                      line_width=0, fillcolor=qc[q], opacity=0.06)
         fig.add_annotation(x=xb if xan == "right" else xa, y=yb if yan == "top" else ya,
                            text=lab, showarrow=False, xanchor=xan, yanchor=yan,
-                           font=dict(size=11, color=_QUAD_COLOR[q]))
+                           font=dict(size=11, color=qc[q]))
     fig.add_hline(y=100, line=dict(color=_MUTED, width=1))
     fig.add_vline(x=100, line=dict(color=_MUTED, width=1))
 
     names = dict(zip(table["代號"], table["名稱"])) if not table.empty else {}
     for sym, df in tails.items():
         q = F.quadrant(df["ratio"].iloc[-1], df["mom"].iloc[-1])
-        color = _QUAD_COLOR.get(q, _MUTED)
+        color = qc.get(q, _MUTED)
         nm = names.get(sym, sym)
         fig.add_trace(go.Scatter(
             x=df["ratio"], y=df["mom"], mode="lines",
@@ -124,11 +128,44 @@ def _fmt_flow_table(df):
     if df is None or df.empty:
         return df
     show = df.copy()
+    # StockCharts 的排序：先依象限（領先 → 改善 → 轉弱 → 落後），再依離基準的距離
+    order = {"leading": 0, "improving": 1, "weakening": 2, "lagging": 3}
+    if "象限" in show:
+        show["_q"] = show["象限"].map(order).fillna(4)
+        if {"RS_Ratio", "RS_Mom"} <= set(show.columns):
+            show["_d"] = -(((show["RS_Ratio"] - 100) ** 2 + (show["RS_Mom"] - 100) ** 2) ** 0.5)
+            show = show.sort_values(["_q", "_d"])
+        else:
+            show = show.sort_values("_q")
     show["象限"] = show.get("象限", pd.Series(dtype=object)).map(
         lambda q: F.QUADRANT[q][0] if q in F.QUADRANT else "—")
     cols = ["名稱", "代號", "資金訊號", "象限", "5日%", "20日%", "60日%",
             "相對大盤20日pp", "CMF20", "成交額放大"]
     return show[[c for c in cols if c in show.columns]]
+
+
+def _style_flow(df):
+    """資金訊號與報酬欄依方向上色（流入 = 偏多色、流出 = 偏空色）。"""
+    if df is None or df.empty:
+        return df
+    c = colors()
+
+    def sig(v):
+        v = str(v)
+        return f"color:{c['up']};font-weight:600" if "流入" in v else (
+            f"color:{c['down']};font-weight:600" if "流出" in v else f"color:{c['flat']}")
+
+    def signed(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return ""
+        return f"color:{c['up'] if f > 0 else c['down']}" if f == f and f else ""
+    sty = df.style
+    if "資金訊號" in df:
+        sty = sty.map(sig, subset=["資金訊號"])
+    cols = [x for x in ("5日%", "20日%", "60日%", "相對大盤20日pp", "CMF20") if x in df]
+    return sty.map(signed, subset=cols) if cols else sty
 
 
 _FLOW_COLCFG = {
@@ -178,17 +215,17 @@ def _render_us(us):
     else:
         _plot(_rrg_chart(us["rrg_cross"], us["cross"], "跨資產 vs S&P500"))
         tbl = us["cross"]
-    st.dataframe(_fmt_flow_table(tbl), hide_index=True, use_container_width=True,
+    st.dataframe(_style_flow(_fmt_flow_table(tbl)), hide_index=True, use_container_width=True,
                  column_config=_FLOW_COLCFG, height=_tbl_h(len(tbl)))
 
     st.markdown("### 風險胃口 — 美國投資人在進攻還是防守")
     lab, up, down = F.risk_appetite_label(us["ratio_stats"])
-    st.markdown(f"**{lab}**　（{up} 項向上 / {down} 項向下）")
+    st.markdown(f"**{lab}**　（{up} 項向上、{down} 項向下）")
     if us["ratio_series"]:
         _plot(_risk_ratio_chart(us["ratio_series"]))
     if not us["ratio_stats"].empty:
         rs = us["ratio_stats"].copy()
-        rs["站上50日線"] = rs["站上50日線"].map({True: "✅ 是", False: "❌ 否"})
+        rs["站上50日線"] = rs["站上50日線"].map({True: "是", False: "否"})
         st.dataframe(rs, hide_index=True, use_container_width=True, column_config={
             "20日變化%": st.column_config.NumberColumn(format="%+.1f%%")})
 
@@ -229,14 +266,15 @@ def _inst_cum_chart(inst):
 
 
 def _diverging_hbar(s, title, unit, hover_extra=None, n=8):
-    """依值排序的水平長條（正綠負紅），只取前 n / 後 n。"""
+    """依值排序的水平長條（正值偏多色、負值偏空色，隨紅漲綠跌設定），只取前 n / 後 n。"""
     s = s.dropna().sort_values()
     if len(s) > 2 * n:
         s = pd.concat([s.head(n), s.tail(n)])
-    colors = [_POS if v >= 0 else _NEG for v in s.values]
+    cc = colors()
+    bar_colors = [cc["up"] if v >= 0 else cc["down"] for v in s.values]
     custom = hover_extra.reindex(s.index).values if hover_extra is not None else None
     fig = go.Figure(go.Bar(
-        x=s.values, y=s.index, orientation="h", marker_color=colors, marker_line_width=0,
+        x=s.values, y=s.index, orientation="h", marker_color=bar_colors, marker_line_width=0,
         text=[f"{v:+.1f}" for v in s.values], textposition="auto",
         insidetextanchor="end", textfont=dict(size=10), cliponaxis=False,
         customdata=custom,
@@ -250,19 +288,41 @@ def _diverging_hbar(s, title, unit, hover_extra=None, n=8):
     return fig
 
 
+def _inst_overview(inst):
+    """Yahoo 奇摩股市的法人總覽版型：外資 / 投信 / 自營商 / 合計 × 當日 / 近 5 日 / 近 20 日 / 連續。"""
+    from twscanner.ui.format import fmt_yi
+    d = inst.copy()
+    d["合計"] = d[["外資", "投信", "自營商"]].sum(axis=1)
+    rows = []
+    for who in ("外資", "投信", "自營商", "合計"):
+        k = F._streak(d[who])
+        rows.append({"身份": who, f"{d.index[-1]:%m/%d}": fmt_yi(d[who].iloc[-1]),
+                     "近 5 日": fmt_yi(d[who].tail(5).sum()), "近 20 日": fmt_yi(d[who].sum()),
+                     "連續": (f"連買 {k} 天" if k > 0 else f"連賣 {-k} 天" if k < 0 else "—")})
+    out = pd.DataFrame(rows)
+    c = colors()
+
+    def tone(v):
+        v = str(v)
+        if v.startswith("+") or v.startswith("連買"):
+            return f"color:{c['up']}"
+        if v.startswith("−") or v.startswith("連賣"):
+            return f"color:{c['down']}"
+        return ""
+    return out.style.map(tone, subset=[col for col in out.columns if col != "身份"])
+
+
 def _render_tw(twd):
     tw, share, isec = twd["tw"], twd["share"], twd["inst_sec"]
     inst = tw.get("inst")
     if inst is None or inst.empty:
         st.info("TWSE 資料暫時抓不到（可能被限流），稍後按「重新整理」再試。")
         return
-    st.markdown("### 三大法人 — 大資金是買還是賣")
-    s5 = inst.tail(5).sum()
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"外資 {inst.index[-1]:%m/%d}", f"{inst['外資'].iloc[-1]:+,.0f} 億")
-    m2.metric("外資 近5日", f"{s5['外資']:+,.0f} 億")
-    m3.metric("投信 近5日", f"{s5['投信']:+,.0f} 億")
-    m4.metric("自營商 近5日", f"{s5['自營商']:+,.0f} 億")
+    st.markdown("### 三大法人：大資金是買還是賣")
+    st.dataframe(_inst_overview(inst), hide_index=True, use_container_width=True, column_config={
+        c: st.column_config.TextColumn(c) for c in ("身份", f"{inst.index[-1]:%m/%d}", "近 5 日", "近 20 日",
+                                                    "連續")})
+    st.caption("單位：億元。紅色 = 買超、綠色 = 賣超（依你的漲跌顏色設定）。連續 = 連續買超或賣超的天數。")
     c1, c2 = st.columns(2)
     with c1:
         _plot(_inst_daily_chart(inst))
@@ -395,17 +455,17 @@ _GUIDE = """
 # 入口
 # ---------------------------------------------------------------
 def render_flows_tab(cache_dir=".cache", tw_days=20):
-    st.markdown("### 💰 資金流向")
+    st.markdown("## 資金流向")
     st.caption("美國投資人的錢在哪、台股法人怎麼佈局、兩邊連動多強。資料：Yahoo Finance、TWSE 官方（每日更新）。")
 
     top = st.columns([1, 1, 4])
     if not st.session_state.get("flows_on"):
-        if top[0].button("📡 載入資金流向", type="primary", key="flows_load"):
+        if top[0].button("載入資金流向", type="primary", key="flows_load"):
             st.session_state["flows_on"] = True
             st.rerun()
         st.info("按下「載入資金流向」開始。第一次需抓台股近 20 日歷史，約 1~2 分鐘；之後每天只補新的一天。")
         return
-    if top[0].button("🔄 重新整理", key="flows_refresh"):
+    if top[0].button("重新整理", key="flows_refresh"):
         _load_us.clear()
         _load_tw.clear()
         st.rerun()
@@ -420,10 +480,10 @@ def render_flows_tab(cache_dir=".cache", tw_days=20):
         risk_stats=us["ratio_stats"] if us else None, tw=twd["tw"],
         tw_share=twd["share"], tw_inst_sec=twd["inst_sec"], link=us["link"] if us else None)
 
-    st.markdown("### 📌 現在錢往哪去（自動摘要）")
+    st.markdown("### 現在錢往哪去")
     c1, c2, c3 = st.columns(3)
-    for col, title, key in ((c1, "🇺🇸 美國資金", "us"), (c2, "🇹🇼 台股資金", "tw"),
-                            (c3, "🔗 台美連動", "link")):
+    for col, title, key in ((c1, "美國資金", "us"), (c2, "台股資金", "tw"),
+                            (c3, "台美連動", "link")):
         with col.container(border=True):
             st.markdown(f"**{title}**")
             lines = summ.get(key) or ["暫無資料"]
@@ -436,7 +496,7 @@ def render_flows_tab(cache_dir=".cache", tw_days=20):
     if asof:
         st.caption("；".join(asof))
 
-    t_us, t_tw, t_link, t_help = st.tabs(["🇺🇸 美國資金", "🇹🇼 台股資金", "🔗 台美連動", "❓ 怎麼看"])
+    t_us, t_tw, t_link, t_help = st.tabs(["美國資金", "台股資金", "台美連動", "怎麼看"])
     with t_us:
         _render_us(us)
     with t_tw:

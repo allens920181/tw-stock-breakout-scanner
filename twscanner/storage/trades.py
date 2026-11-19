@@ -1,12 +1,12 @@
 """
-已實現交易紀錄的持久化：本機 ~/.tw_scanner_trades.json；登入雲端時同步存到 Neon（tw_kv）。
-"""
-import json
-from pathlib import Path
+已實現交易紀錄的持久化：只存在「登入後的雲端空間」（Neon tw_kv）。
 
+刻意不寫伺服器本機檔案：部署在 Streamlit Cloud 時所有訪客共用同一台機器，
+本機檔案會讓任何人都看得到你的交易。未登入時紀錄只留在瀏覽器 session，請用匯出 / 匯入備份
+（與持股的作法一致）。
+"""
 from twscanner.storage import cloud
 
-TRADES_PATH = Path.home() / ".tw_scanner_trades.json"
 _KEY = "trades"
 
 
@@ -15,19 +15,11 @@ def load_records(owner=None):
         recs = cloud.kv_get(owner, _KEY)
         if recs is not None:
             return list(recs)
-    try:
-        return json.loads(TRADES_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    return []
 
 
 def save_records(records, owner=None):
-    ok = True
-    try:
-        TRADES_PATH.write_text(json.dumps(records, ensure_ascii=False, indent=1, default=str),
-                               encoding="utf-8")
-    except Exception:
-        ok = False
+    """有登入才寫雲端；回傳是否已永久保存。"""
     if owner and cloud.is_enabled():
-        ok = bool(cloud.kv_set(owner, _KEY, records)) and ok
-    return ok
+        return bool(cloud.kv_set(owner, _KEY, records))
+    return False

@@ -1,520 +1,261 @@
-"""📈 買入掃描分頁。"""
+"""找標的：結論 → 數字 → 結果表（點一列看理由與交易計畫）→ 進階工具。"""
 import io
-import logging
-import tempfile
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
-from twscanner.core.tz import now_tw, today_tw
-from twscanner.data.universe import fetch_twse_universe
+from twscanner.core.tz import today_tw
 from twscanner.reporting.excel import write_excel
-from twscanner.services import run_adaptive_recommend, run_scan
-from twscanner.storage import cloud as store
-from twscanner.storage.history import cleanup_old, save_scan
-from twscanner.ui.components.common import make_progress_block, render_onboarding
-from twscanner.ui.components.signals import action_class
-from twscanner.ui.glossary import HELP
+from twscanner.services import run_adaptive_recommend
+from twscanner.services.today import CONDITION_KEYS, trade_plan
+from twscanner.ui.actions import execute_scan, rescan_with_cache, sync_strategy_mode
+from twscanner.ui.components.blocks import asof, buy_form, conclusion, empty, kpi_row, plan_card
+from twscanner.ui.format import clean_stock_col, colors
 from twscanner.ui.settings import build_cfg
-from twscanner.ui.state import (
-    cloud_owner,
-    get_base_config,
-    get_prefs,
-    persist_calibration_date,
-)
+from twscanner.ui.state import get_base_config, persist_calibration_date
+
+SIGNAL_RANK = {"進場": 0, "觀察": 1, "不操作": 2, "未通過過濾": 3}
+GROUPS = {
+    "進場計畫": ["股票", "綜合評級", "訊號判斷", "評分", "說明", "進場參考價", "停損價",
+               "目標價1(+1R半倉)", "目標價2(+2R出清)", "建議張數"],
+    "風險與部位": ["股票", "訊號判斷", "風險%", "RR比", "建議張數", "進場成本", "佔資金%",
+                "現價偏離%", "乖離MA20%", "部位提示"],
+    "籌碼與基本面": ["股票", "訊號判斷", "籌碼確認", "法人買賣超(張)", "外資買賣超(張)", "法人連買天數",
+                 "法人5日累計(張)", "融資券提示", "營收動能", "月營收YoY%", "距財報日"],
+    "技術面": ["股票", "訊號判斷", "收盤價", "換手率%", "相對強度RS%", "ADX", "K", "D", "MA20", "MA60",
+            "啟動就緒度"],
+}
+NUM_FMT = {
+    "進場參考價": "%.2f", "停損價": "%.2f", "目標價1(+1R半倉)": "%.2f", "目標價2(+2R出清)": "%.2f",
+    "收盤價": "%.2f", "MA20": "%.2f", "MA60": "%.2f", "K": "%.1f", "D": "%.1f", "ADX": "%.1f",
+    "風險%": "%.2f%%", "佔資金%": "%.2f%%", "現價偏離%": "%+.2f%%", "乖離MA20%": "%+.2f%%",
+    "換手率%": "%.2f%%", "相對強度RS%": "%+.2f%%", "月營收YoY%": "%+.1f%%", "RR比": "%.2f",
+    "建議張數": "%d 張", "進場成本": "localized", "法人買賣超(張)": "localized",
+    "外資買賣超(張)": "localized", "法人5日累計(張)": "localized", "法人連買天數": "%d 天", "評分": "%d",
+}
+SIGNED = ["法人買賣超(張)", "外資買賣超(張)", "法人5日累計(張)", "相對強度RS%", "月營收YoY%",
+          "現價偏離%", "乖離MA20%"]
 
 
-def render_results_table(df, key_prefix=""):
-    # ===== Row 1：訊號 / 進場類型 / 最低評分 / 搜尋 =====
-    fcol1, fcol2, fcol3, fcol4 = st.columns([2, 2, 1.5, 1.5])
+def _headline(df, market_state):
+    n_go = int((df["訊號判斷"] == "進場").sum()) if "訊號判斷" in df else 0
+    n_watch = int((df["訊號判斷"] == "觀察").sum()) if "訊號判斷" in df else 0
+    regime = (market_state or {}).get("regime")
+    if regime == "bear":
+        return (f"大盤空頭：系統暫停進場（{n_watch} 檔列為觀察）",
+                "只做多的策略在空頭時休息。可以先把觀察名單記下來，等大盤翻多再看。", "stop")
+    if n_go == 0:
+        return (f"今天沒有達到進場標準的股票（{n_watch} 檔觀察）",
+                "沒有好機會時不做，也是一種操作。", "wait")
+    return (f"{n_go} 檔達到進場標準，{n_watch} 檔觀察",
+            "點表格中的一列，看入選理由與完整交易計畫。挑 1–2 檔就好。", "go")
 
-    signal_options = ["進場", "觀察", "不操作"]
-    available_signals = [
-        s for s in signal_options
-        if "訊號判斷" in df.columns and (df["訊號判斷"] == s).any()
-    ]
-    default_signals = [s for s in ["進場", "觀察"] if s in available_signals]
-    sel_signals = fcol1.multiselect(
-        "訊號", options=available_signals,
-        default=default_signals or available_signals,
-        key=f"{key_prefix}sig", help=HELP["signal"],
-    )
 
-    entry_type_options = []
-    if "進場類型" in df.columns:
-        entry_type_options = sorted(
-            [x for x in df["進場類型"].dropna().unique() if x and x != "—"]
-        )
-    sel_entry_types = fcol2.multiselect(
-        "進場類型", options=entry_type_options,
-        default=entry_type_options,
-        key=f"{key_prefix}etype",
-        disabled=len(entry_type_options) == 0,
-        help=HELP["entry_type"],
-    )
+def _style(view):
+    c = colors()
 
-    _top = pd.to_numeric(df["評分"], errors="coerce").max() if len(df) and "評分" in df.columns else 8
-    # 全部 0 分（如大盤空頭）或全空值時，滑桿上下限相同會讓 Streamlit 拋例外 → 至少 1
-    max_score = max(int(_top), 1) if pd.notna(_top) else 8
-    min_score_filter = fcol3.slider(
-        "最低評分", 0, max_score, 0, key=f"{key_prefix}minsc",
-        help=HELP["score"],
-    )
-    keyword = fcol4.text_input("搜尋", placeholder="股票或公司名",
-                                key=f"{key_prefix}kw")
+    def sig(v):
+        if v == "進場":
+            return f"background-color:{c['up_bg']};color:{c['up_text']};font-weight:600"
+        if v == "觀察":
+            return "color:#1D4ED8"
+        return "color:#64748B"
 
-    # ===== Row 2：風險% / 換手率% / 建議張數 / 顯示全欄 =====
-    fr1, fr2, fr3, fr4 = st.columns([2, 2, 1.5, 1.5])
+    def signed(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return ""
+        return f"color:{c['up'] if f > 0 else c['down']}" if f else ""
+    sty = view.style
+    if "訊號判斷" in view:
+        sty = sty.map(sig, subset=["訊號判斷"])
+    cols = [x for x in SIGNED if x in view.columns]
+    if cols:
+        sty = sty.map(signed, subset=cols)
+    return sty
 
-    if "風險%" in df.columns and df["風險%"].notna().any():
-        risk_max = float(df["風險%"].max())
-        risk_range = fr1.slider(
-            "風險% 範圍", 0.0, max(risk_max, 50.0), (0.0, max(risk_max, 50.0)),
-            step=1.0, key=f"{key_prefix}risk", help=HELP["risk_pct_signal"],
-        )
+
+def _table(df):
+    f1, f2, f3 = st.columns([1.6, 2.6, 1.4])
+    sig = f1.segmented_control("訊號", ["全部", "進場", "觀察"], default="全部", key="scan_sig")
+    group = f2.segmented_control("欄位", list(GROUPS) + ["全部欄位"], default="進場計畫", key="scan_grp")
+    kw = f3.text_input("搜尋", placeholder="代號或名稱", key="scan_kw", label_visibility="collapsed")
+
+    d = df.copy()
+    d["_rank"] = d["訊號判斷"].map(SIGNAL_RANK).fillna(3) if "訊號判斷" in d else 0
+    by = ["_rank", "評分"] if "評分" in d else ["_rank"]
+    d = d.sort_values(by, ascending=[True, False][:len(by)])
+    if sig in ("進場", "觀察"):
+        d = d[d["訊號判斷"] == sig]
+    if kw:
+        k = kw.strip()
+        d = d[d["股票"].astype(str).str.contains(k, regex=False) | d.get("公司名稱", pd.Series("", index=d.index))
+              .astype(str).str.contains(k, regex=False)]
+    d = d.reset_index(drop=True)
+    # 「無法分析」多半是沒通過品質過濾（例如未站上 MA60），把原因直接顯示出來
+    if "訊號判斷" in d:
+        filtered = d["訊號判斷"] == "無法分析"
+        d.loc[filtered, "訊號判斷"] = "未通過過濾"
+        reason = d["狀態"] if "狀態" in d else pd.Series("", index=d.index)
+        action = d["操作建議"] if "操作建議" in d else pd.Series("", index=d.index)
+        d["說明"] = reason.where(filtered, action)
+    view = clean_stock_col(d)
+    if group and group != "全部欄位":
+        view = view[[c for c in GROUPS[group] if c in view.columns]]
     else:
-        risk_range = None
+        view = view.drop(columns=[c for c in view.columns if c.startswith("_")])
+    if view.empty:
+        empty("沒有符合條件的股票", "換一個訊號篩選或清除搜尋字。")
+        return None
+    for c in NUM_FMT:
+        if c in view:
+            view[c] = pd.to_numeric(view[c], errors="coerce")       # None → 空白，不顯示「None」
+    for c in view.columns:
+        if view[c].dtype == object:
+            view[c] = view[c].where(view[c].notna() & (view[c].astype(str) != "None"), "—")
+    cfg = {c: st.column_config.NumberColumn(c, format=f) for c, f in NUM_FMT.items() if c in view}
+    cfg["股票"] = st.column_config.TextColumn("股票", pinned=True)
+    event = st.dataframe(_style(view), hide_index=True, use_container_width=True,
+                         height=min(36 * (len(view) + 1) + 4, 560), column_config=cfg,
+                         on_select="rerun", selection_mode="single-row", key="scan_table")
+    st.caption(f"共 {len(view)} 檔 · 依訊號、分數排序 · 點一列看理由與交易計畫")
+    rows = event.selection.rows if event and event.selection else []
+    return d.iloc[rows[0]] if rows else None
 
-    if "換手率%" in df.columns and df["換手率%"].notna().any():
-        tr_max = float(df["換手率%"].max())
-        tr_range = fr2.slider(
-            "換手率% 範圍", 0.0, max(tr_max, 30.0), (0.0, max(tr_max, 30.0)),
-            step=0.5, key=f"{key_prefix}tr", help=HELP["turnover_rate"],
-        )
-    else:
-        tr_range = None
 
-    lots_min = fr3.number_input(
-        "最少建議張數", min_value=0, value=0, step=1,
-        key=f"{key_prefix}lots",
-        help=HELP["suggested_lots"],
-    )
-    show_full = fr4.toggle("顯示全欄", value=False, key=f"{key_prefix}full")
+def stock_detail(row, key="scan"):
+    """一列結果 → 條件逐項 + 交易計畫卡 + 我已買進。找標的與今日決策共用。"""
+    plan = trade_plan(row)
+    plan_card(plan)
+    with st.expander("為什麼是這個分數：條件逐項", expanded=False):
+        lines = []
+        for k, label in CONDITION_KEYS:
+            if k in row.index:
+                v = row.get(k)
+                ok = v is not None and v == v and bool(v)
+                lines.append(f"- {'✓ 通過' if ok else '✗ 未通過'}　{label}")
+        for k in ("評級理由", "籌碼確認", "營收動能", "融資券提示", "部位提示", "距財報日"):
+            v = row.get(k)
+            if v is not None and v == v and str(v) not in ("", "—"):
+                lines.append(f"- **{k}**：{v}")
+        st.markdown("\n".join(lines) or "沒有條件明細。")
+    buy_form(plan, key)
 
-    # ===== 套用所有篩選（AND）=====
-    filtered = df.copy()
-    if "訊號判斷" in filtered.columns and sel_signals:
-        filtered = filtered[filtered["訊號判斷"].isin(sel_signals)]
-    if "進場類型" in filtered.columns and sel_entry_types and entry_type_options:
-        # 「—」或空值視為不限
-        mask = filtered["進場類型"].isin(sel_entry_types) | filtered["進場類型"].isna() | (filtered["進場類型"] == "—")
-        if set(sel_entry_types) != set(entry_type_options):
-            # 使用者有手動取消，才嚴格篩選
-            mask = filtered["進場類型"].isin(sel_entry_types)
-        filtered = filtered[mask]
-    if "評分" in filtered.columns:
-        filtered = filtered[filtered["評分"] >= min_score_filter]
-    if keyword:
-        k = keyword.strip()
-        mask = (
-            filtered.get("股票", pd.Series(dtype=str)).astype(str).str.contains(k, case=False, na=False)
-            | filtered.get("公司名稱", pd.Series(dtype=str)).astype(str).str.contains(k, case=False, na=False)
-        )
-        filtered = filtered[mask]
-    if risk_range is not None and "風險%" in filtered.columns:
-        filtered = filtered[
-            (filtered["風險%"].fillna(0) >= risk_range[0])
-            & (filtered["風險%"].fillna(0) <= risk_range[1])
-        ]
-    if tr_range is not None and "換手率%" in filtered.columns:
-        filtered = filtered[
-            (filtered["換手率%"].fillna(0) >= tr_range[0])
-            & (filtered["換手率%"].fillna(0) <= tr_range[1])
-        ]
-    if lots_min > 0 and "建議張數" in filtered.columns:
-        filtered = filtered[filtered["建議張數"].fillna(0) >= lots_min]
 
-    st.caption(f"顯示 {len(filtered)} / {len(df)} 筆")
+def _advanced(result, df):
+    base_cfg = get_base_config()
+    with st.expander("進階：重新評估、自動校準、下載", expanded=False):
+        c1, c2 = st.columns([3, 1.3])
+        c1.caption("換了風格、權重或門檻後，可以用現有資料重新評估，不必重抓。")
+        if c2.button("用現有資料重新評估", use_container_width=True):
+            with st.spinner("重新分析中 …"):
+                rescan_with_cache("已用現有資料重新評估")
+            st.rerun()
+        _calibration(result)
+        st.divider()
+        summary, failed = result["summary"], result["failed_df"]
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as w:
+            df.to_excel(w, sheet_name="全部分析結果", index=False)
+            summary.to_excel(w, sheet_name="Report摘要", index=False)
+            if failed is not None and len(failed):
+                failed.to_excel(w, sheet_name="錯誤清單", index=False)
+        d1, d2 = st.columns(2)
+        d1.download_button("下載 Excel 報告", data=buf.getvalue(), file_name="台股分析報告.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True)
+        if d2.button("寫入專案目錄", use_container_width=True):
+            out = st.session_state.get("cfg", base_cfg)["output"]
+            st.success(f"已輸出：{write_excel(df, summary, failed, out['dir'], out['prefix'])}")
+        if failed is not None and len(failed):
+            st.caption(f"抓不到資料的股票（{len(failed)} 檔）")
+            st.dataframe(failed, use_container_width=True, hide_index=True)
 
-    # 精簡欄位（預設）
-    minimal_cols = [
-        "股票", "公司名稱", "綜合評級", "啟動標籤", "啟動就緒度", "評級理由",
-        "操作建議", "評分顯示",
-        "目前現價", "進場參考價", "現價偏離%", "停損價", "目標價1(+1R半倉)",
-        "風險%", "建議張數", "換手率%", "籌碼確認", "營收動能", "相對強度RS%",
-    ]
-    full_priority = minimal_cols + [
-        "進場類型", "進場條件", "進場成本", "佔資金%", "部位提示",
-        "法人連買天數", "法人買賣超(張)", "外資買賣超(張)", "法人5日累計(張)",
-        "融資券提示", "融資增減%", "券資比%",
-        "月營收YoY%", "月營收MoM%", "營收月份",
-        "財報日", "距財報日",
-        "產業", "族群同步", "族群強勢檔數",
-        "相對強度RS%", "趨勢確認", "ADX", "乖離MA20%", "大盤確認(FTD)",
-        "市場", "訊號判斷", "評分", "收盤價",
-        "目標價2(+2R出清)", "RR比", "ATR14",
-        "20日平均換手率%", "MA5", "MA20", "MA60", "K", "D", "OSC",
-        "成交量", "20日均量", "50日均量",
-        "突破+量增", "MA多頭", "換手率強勢", "KD強勢", "MACD多方", "相對強度",
-        "大盤狀態", "狀態",
-    ]
-    target_cols = full_priority if show_full else minimal_cols
-    show_cols = [c for c in target_cols if c in filtered.columns]
-    if show_full:
-        other_cols = [c for c in filtered.columns if c not in show_cols]
-        show_cols += other_cols
-    display = filtered[show_cols]
 
-    col_cfg = {}
-    col_help_map = {
-        "風險%": HELP["risk_pct_signal"],
-        "佔資金%": HELP["cost_pct"],
-        "換手率%": HELP["turnover_rate"],
-        "20日平均換手率%": HELP["turnover_rate"],
-        "現價偏離%": "目前現價相對進場參考價的偏離；>+5% 會降為觀察（追高風險）",
-        "相對強度RS%": HELP["weight_rel_strength"],
-        "乖離MA20%": "進場參考價相對 MA20 的乖離；≥+10% 視為過度延伸（追高）降為觀察",
-        "ADX": "趨勢強度指標；>20 視為趨勢成形，>40 強勁",
-        "ATR14": "14 日平均真實波幅；停損 = 進場價 - ATR×倍數，使各股風險距離一致",
-    }
-    for c, h in col_help_map.items():
-        if c in display.columns:
-            col_cfg[c] = st.column_config.NumberColumn(c, format="%.2f%%", help=h)
-    if "進場成本" in display.columns:
-        col_cfg["進場成本"] = st.column_config.NumberColumn("進場成本", format="%d")
-    if "操作建議" in display.columns:
-        col_cfg["操作建議"] = st.column_config.TextColumn("操作建議", help=HELP["action"])
-    if "綜合評級" in display.columns:
-        col_cfg["綜合評級"] = st.column_config.TextColumn(
-            "綜合評級", help="A=強力進場 / B=可進場 / C=觀察 / 避開。綜合技術+籌碼+RS+風險的一眼結論。")
-    if "啟動就緒度" in display.columns:
-        col_cfg["啟動就緒度"] = st.column_config.ProgressColumn(
-            "啟動就緒度", min_value=0, max_value=100, format="%d",
-            help="潛伏標的『即將啟動』的程度(0~100)：波動收斂+逼近突破+法人吸籌+量縮。越高越接近發動，點欄位標題可排序。")
-    if "啟動標籤" in display.columns:
-        col_cfg["啟動標籤"] = st.column_config.TextColumn(
-            "啟動標籤", help="⚡已啟動/即將啟動 > 🔋蓄勢中 > 🌱醞釀早期")
-    if "評分顯示" in display.columns:
-        col_cfg["評分顯示"] = st.column_config.TextColumn("評分顯示", help=HELP["score"])
-    if "RR比" in display.columns:
-        col_cfg["RR比"] = st.column_config.NumberColumn("RR比", help=HELP["rr_ratio"])
-    if "建議張數" in display.columns:
-        col_cfg["建議張數"] = st.column_config.NumberColumn("建議張數", format="%d", help=HELP["suggested_lots"])
-    if "進場類型" in display.columns:
-        col_cfg["進場類型"] = st.column_config.TextColumn("進場類型", help=HELP["entry_type"])
-    if "停損價" in display.columns:
-        col_cfg["停損價"] = st.column_config.NumberColumn("停損價", format="%.2f", help=HELP["stop_loss"])
-    if "目標價1(+1R半倉)" in display.columns:
-        col_cfg["目標價1(+1R半倉)"] = st.column_config.NumberColumn("目標價1(+1R半倉)", format="%.2f", help=HELP["target_1r"])
-    if "目標價2(+2R出清)" in display.columns:
-        col_cfg["目標價2(+2R出清)"] = st.column_config.NumberColumn("目標價2(+2R出清)", format="%.2f", help=HELP["target_2r"])
-    if "籌碼確認" in display.columns:
-        col_cfg["籌碼確認"] = st.column_config.TextColumn("籌碼確認", help=HELP["chip_confirm"])
-    for cc in ("法人買賣超(張)", "外資買賣超(張)", "法人5日累計(張)"):
-        if cc in display.columns:
-            col_cfg[cc] = st.column_config.NumberColumn(
-                cc, format="%d",
-                help=HELP["chip_foreign"] if "外資" in cc else HELP["chip_inst"],
-            )
-    if "法人連買天數" in display.columns:
-        col_cfg["法人連買天數"] = st.column_config.NumberColumn(
-            "法人連買天數", format="%d", help=HELP["chip_streak"])
-    if "融資券提示" in display.columns:
-        col_cfg["融資券提示"] = st.column_config.TextColumn("融資券提示", help=HELP["margin_flag"])
-    if "融資增減%" in display.columns:
-        col_cfg["融資增減%"] = st.column_config.NumberColumn("融資增減%", format="%.2f%%", help=HELP["margin_chg"])
-    if "券資比%" in display.columns:
-        col_cfg["券資比%"] = st.column_config.NumberColumn("券資比%", format="%.2f%%", help=HELP["short_ratio"])
-    if "族群同步" in display.columns:
-        col_cfg["族群同步"] = st.column_config.TextColumn("族群同步", help=HELP["group_sync"])
-    if "族群強勢檔數" in display.columns:
-        col_cfg["族群強勢檔數"] = st.column_config.NumberColumn("族群強勢檔數", format="%d", help=HELP["group_sync"])
-    if "財報日" in display.columns:
-        col_cfg["財報日"] = st.column_config.TextColumn("財報日", help=HELP["earnings_blackout"])
-    if "距財報日" in display.columns:
-        col_cfg["距財報日"] = st.column_config.NumberColumn("距財報日", format="%d", help=HELP["earnings_blackout"])
-
-    # 訊號燈號（列底色）— 用「操作建議」分類，永遠存在於 display
-    def _row_style(row):
-        action = str(row.get("操作建議", ""))
-        cls = action_class(action)
-        if cls == "go":
-            return ["background-color: #DCFCE7"] * len(row)
-        if cls == "watch":
-            return ["background-color: #FEF3C7"] * len(row)
-        return [""] * len(row)
-
-    # column_config 的 ProgressColumn 會接管 cell 渲染導致 Styler 失效，
-    # 同時使用 Styler 時改用純 NumberColumn 顯示評分
-    col_cfg_styled = {k: v for k, v in col_cfg.items() if k != "評分"}
-
+def _calibration(result):
+    res = st.session_state["scan_cache"].get("resolved", []) if st.session_state.get("scan_cache") else []
+    if not res:
+        return
+    st.markdown("**自動校準**：用現有資料跑回測，只套用樣本外驗證通過的參數，再重新評估。")
+    lc = st.session_state.get("last_calibrated_date")
+    if lc:
+        try:
+            days = (today_tw() - datetime.fromisoformat(lc).date()).days
+            st.caption(f"上次校準 {days} 天前" + ("。建議每月一次就好，太頻繁會過度擬合。" if days < 20 else "。"))
+        except Exception:
+            pass
+    if len(res) > 400:
+        st.caption(f"目前 {len(res)} 檔，校準可能要數分鐘。")
+    o1, o2 = st.columns([2, 1])
+    lookback = o1.slider("校準回測天數", 60, 250, int(st.session_state.get("ac_lookback", 120)), 30,
+                         key="ac_lookback")
+    if not o2.button("校準並重新評估", use_container_width=True):
+        if st.session_state.get("autocal_plan"):
+            p = st.session_state["autocal_plan"]
+            st.caption(("已套用：" + "、".join(p["summary"])) if p["summary"] else "上次校準沒有可套用的建議。")
+        return
+    from twscanner.research.adaptive import pick_applicable
+    bar = st.progress(0.0, text="自動校準中 …")
     try:
-        styled = display.style.apply(_row_style, axis=1)
-        st.dataframe(
-            styled, use_container_width=True, height=500,
-            column_config=col_cfg_styled, hide_index=True,
-        )
+        ar = run_adaptive_recommend(res, build_cfg(), lookback_days=int(lookback),
+                                    hold_days=int(st.session_state.get("ac_hold", 10)),
+                                    targets=("thresholds", "weights", "regime"),
+                                    progress_cb=lambda p, m: bar.progress(min(p * 0.8, 0.8), text=m))
+        plan = pick_applicable(ar, require_oos=True)
+        ap = plan["applied"]
+        for k in ("thr_enter", "f_atr_mult", "regime_thresholds"):
+            if k in ap:
+                st.session_state[k] = ap[k]
+        keymap = {"breakout_with_volume": "w_breakout", "ma_bullish": "w_ma", "turnover_strong": "w_turnover",
+                  "kd": "w_kd", "macd": "w_macd", "rel_strength": "w_rs", "trend_confirm": "w_trend"}
+        for sk, ssk in keymap.items():
+            if sk in ap.get("weights", {}):
+                st.session_state[ssk] = ap["weights"][sk]
+        st.session_state["adapt_result"] = ar
+        st.session_state["autocal_plan"] = plan
+        persist_calibration_date()
+        rescan_with_cache()
+        st.rerun()
     except Exception as e:
-        st.warning(f"列底色失效：{e}")
-        st.dataframe(
-            display, use_container_width=True, height=500,
-            column_config=col_cfg, hide_index=True,
-        )
-
-    return filtered
+        st.error(f"自動校準失敗：{e}")
 
 
 def render(sb):
-    """📈 買入掃描"""
-    base_cfg = get_base_config()
-    mode, uploaded, universe_kind = sb.mode, sb.uploaded, sb.universe_kind
-    run_btn, _mode_opts = sb.run_btn, sb.mode_labels
-    prefs = get_prefs()
-    # ===== 今日三步引導列（降低首步迷路）=====
-    st.markdown(
-        "<div class='today-steps'>"
-        "<span class='step'><b>①</b> 看上方大盤燈（🔴空頭別買）</span>"
-        "<span class='arrow'>→</span>"
-        "<span class='step'><b>②</b> 側欄選模式/來源，點「開始掃描」</span>"
-        "<span class='arrow'>→</span>"
-        "<span class='step'><b>③</b> 進場後到「💼 持股管理」追蹤出場</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ===== 執行掃描（進度條 / log 顯示在 tab1 內）=====
-    if run_btn:
-        input_path = None
-        items = None
-
-        if mode == "掃描全台股":
-            try:
-                with st.spinner("抓取全台股清單 …"):
-                    raw = fetch_twse_universe(
-                        include_common=universe_kind in ("twse", "twse-common"),
-                        include_etf=universe_kind in ("twse", "twse-etf"),
-                    )
-                items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
-                st.info(f"將掃描 {len(items)} 檔")
-            except Exception as e:
-                st.error(f"抓取全台股清單失敗：{e}")
-                st.stop()
-        elif uploaded:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            tmp.write(uploaded.getvalue())
-            tmp.close()
-            input_path = tmp.name
-        else:
-            st.error("請從側欄選擇資料來源（上傳清單或全台股）")
-            st.stop()
-
-        cfg = build_cfg()
-        bar, log_area, buf, handler = make_progress_block("掃描")
-        logging.getLogger().setLevel(logging.INFO)
-        logging.getLogger().addHandler(handler)
-
-        def on_progress(stage, pct, msg):
-            bar.progress(min(pct, 1.0), text=f"{stage} — {msg}")
-            log_area.code("\n".join(buf[-30:]) or "（執行中…）")
-
-        try:
-            with st.spinner("掃描中 …"):
-                result = run_scan(
-                    input_path=input_path, cfg=cfg,
-                    progress_cb=on_progress, items=items,
-                )
-            st.session_state["result"] = result
-            st.session_state["scan_cache"] = result.get("scan_cache")
-            st.session_state["cfg"] = cfg
-            st.session_state["_result_mode"] = st.session_state.get("strategy_mode", "breakout")
-            st.session_state["last_scan_at"] = now_tw().strftime("%H:%M:%S")
-            try:
-                save_scan(result, market_state=result.get("market_state"),
-                          label=mode)
-                cleanup_old(keep_n=30)
-            except Exception as e:
-                logging.getLogger("main").warning("存歷史失敗：%s", e)
-            # 前向訊號日誌（live OOS）：記錄本次進場清單
-            try:
-                from twscanner.portfolio.journal import load_journal as _ld_jrn
-                from twscanner.portfolio.journal import log_signals
-                _added = log_signals(
-                    result["df"], today_tw().isoformat(),
-                    mode=mode, signals=("進場",))
-                if _added:
-                    st.toast(f"已記錄 {_added} 筆進場到訊號日誌（可在『歷史』追蹤實戰績效）",
-                             icon="📓")
-                    if cloud_owner():          # 鏡像到雲端（永久保存）
-                        store.save_journal(cloud_owner(), _ld_jrn())
-            except Exception as e:
-                logging.getLogger("main").warning("訊號日誌記錄失敗：%s", e)
-        except Exception as e:
-            st.error(f"掃描失敗：{e}")
-            st.exception(e)
-            st.stop()
-        finally:
-            logging.getLogger().removeHandler(handler)
-        bar.progress(1.0, text=f"完成（{result['elapsed_sec']:.1f} 秒）")
+    if sb.run_btn and execute_scan(sb):
+        st.rerun()      # 今日決策分頁在前面已畫完，重跑讓它看到新的掃描結果
+    sync_strategy_mode(sb.mode_labels)
 
     if "result" not in st.session_state:
-        if not prefs.get("onboarded", False):
-            render_onboarding()
-        else:
-            st.info("從側欄選擇資料來源後點「**開始掃描**」")
-    else:
-        # ===== 切換策略模式 → 自動用快取即時重算（免重抓）=====
-        _cur_mode = st.session_state.get("strategy_mode", "breakout")
-        if (st.session_state.get("scan_cache")
-                and st.session_state.get("_result_mode") not in (None, _cur_mode)):
-            cfg = build_cfg()
-            try:
-                with st.spinner(f"切換為「{_mode_opts.get(_cur_mode, _cur_mode)}」，即時重算（免重抓）…"):
-                    new_result = run_scan(cfg=cfg, cached=st.session_state["scan_cache"])
-                new_result["scan_cache"] = st.session_state["scan_cache"]
-                st.session_state["result"] = new_result
-                st.session_state["cfg"] = cfg
-                st.session_state["_result_mode"] = _cur_mode
-                st.rerun()
-            except Exception as e:
-                st.session_state["_result_mode"] = _cur_mode   # 避免反覆重試
-                st.error(f"即時切換失敗：{e}")
+        conclusion("還沒有掃描結果",
+                   "三步驟：① 側欄選資料來源（上傳清單或全台股）與策略模式 → ② 按「開始掃描」"
+                   "→ ③ 點結果表的一列，看入選理由與交易計畫；買進後按「我已買進」記入持股。", "info")
+        if st.button("用目前設定開始掃描", type="primary"):
+            execute_scan(sb)
+            st.rerun()
+        return
 
-        result = st.session_state["result"]
-        df = result["df"]
-        summary = result["summary"]
-        failed_df = result["failed_df"]
-
-        # ===== 換風格/權重後免重抓、手動重新評估 =====
-        if st.session_state.get("scan_cache"):
-            rc1, rc2 = st.columns([3, 1.4])
-            rc1.caption(f"目前資料：{st.session_state.get('last_scan_at', '')} 抓取。"
-                        f"**策略模式切換已即時生效**；換「風格 Preset / 權重」後按右鈕重評估。")
-            if rc2.button("⚡ 套用設定重評估（免重抓）", use_container_width=True):
-                cfg = build_cfg()
-                try:
-                    with st.spinner("用現有資料重新分析 …"):
-                        new_result = run_scan(cfg=cfg, cached=st.session_state["scan_cache"])
-                    # 保留快取（重評估不改原始資料）
-                    new_result["scan_cache"] = st.session_state["scan_cache"]
-                    st.session_state["result"] = new_result
-                    st.session_state["cfg"] = cfg
-                    st.session_state["_result_mode"] = _cur_mode
-                    st.toast("已用現有資料重新評估", icon="⚡")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"重評估失敗：{e}")
-
-            # ===== 一鍵：自動校準（依回測最佳參數）並重掃 =====
-            with st.expander("🚀 一鍵自動校準並重掃（依回測最佳參數）", expanded=False):
-                _res = st.session_state["scan_cache"].get("resolved", [])
-                _n = len(_res)
-                st.caption(
-                    f"用現有 {_n} 檔資料：跑回測網格 → 取參數高原中心/lift權重/各盤勢最佳門檻 → "
-                    f"**只自動套用 OOS 通過(✅) 的建議** → 立即重掃。免重抓、免逐步操作。"
-                )
-                if _n > 400:
-                    st.warning(
-                        f"⚠ 目前 {_n} 檔較多，校準需跑多輪全清單回測，可能要**數分鐘**。"
-                        "建議先用較精簡的清單，或縮短回測天數。"
-                    )
-                _lc = st.session_state.get("last_calibrated_date")
-                if _lc:
-                    try:
-                        _d = (today_tw() - datetime.fromisoformat(_lc).date()).days
-                        if _d < 20:
-                            st.warning(f"🕒 上次校準 {_d} 天前。建議每月一次即可，"
-                                       "太頻繁會慢性過擬合（OOS 失去意義）。")
-                        else:
-                            st.caption(f"🕒 上次校準 {_d} 天前。")
-                    except Exception:
-                        pass
-                oc1, oc2 = st.columns([2, 1])
-                ac_lookback = oc1.slider("校準回測天數", 60, 250,
-                                         int(st.session_state.get("ac_lookback", 120)),
-                                         30, key="ac_lookback")
-                go_auto = oc2.button("🚀 一鍵校準並重掃",
-                                     type="primary", use_container_width=True)
-                if go_auto:
-                    from twscanner.research.adaptive import pick_applicable
-                    cfg = build_cfg()
-                    bar_o = st.progress(0.0, text="自動校準中 …")
-
-                    def _oc_cb(p, msg):
-                        try:
-                            bar_o.progress(min(p * 0.8, 0.8), text=f"校準：{msg}")
-                        except Exception:
-                            pass
-                    try:
-                        ar = run_adaptive_recommend(
-                            _res, cfg, lookback_days=int(ac_lookback),
-                            hold_days=int(st.session_state.get("ac_hold", 10)),
-                            targets=("thresholds", "weights", "regime"),
-                            progress_cb=_oc_cb,
-                        )
-                        plan = pick_applicable(ar, require_oos=True)
-                        ap = plan["applied"]
-                        # 套用到 session（與手動面板同鍵）
-                        if "thr_enter" in ap:
-                            st.session_state["thr_enter"] = ap["thr_enter"]
-                        if "f_atr_mult" in ap:
-                            st.session_state["f_atr_mult"] = ap["f_atr_mult"]
-                        if "weights" in ap:
-                            _m = {"breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
-                                  "turnover_strong": "w_turnover", "kd": "w_kd",
-                                  "macd": "w_macd", "rel_strength": "w_rs",
-                                  "trend_confirm": "w_trend"}
-                            for sc_key, ss_key in _m.items():
-                                if sc_key in ap["weights"]:
-                                    st.session_state[ss_key] = ap["weights"][sc_key]
-                        if "regime_thresholds" in ap:
-                            st.session_state["regime_thresholds"] = ap["regime_thresholds"]
-                        st.session_state["adapt_result"] = ar
-                        st.session_state["autocal_plan"] = plan
-                        persist_calibration_date()
-                        # 用套用後的 cfg 立即重掃（免重抓）
-                        bar_o.progress(0.85, text="套用建議後重掃 …")
-                        cfg2 = build_cfg()
-                        new_result = run_scan(cfg=cfg2, cached=st.session_state["scan_cache"])
-                        new_result["scan_cache"] = st.session_state["scan_cache"]
-                        st.session_state["result"] = new_result
-                        st.session_state["cfg"] = cfg2
-                        bar_o.progress(1.0, text="完成")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"一鍵校準失敗：{e}")
-                if st.session_state.get("autocal_plan"):
-                    _plan = st.session_state["autocal_plan"]
-                    if _plan["summary"]:
-                        st.success("✅ 已自動套用並重掃：" + "、".join(_plan["summary"]))
-                    else:
-                        st.info("本次無 OOS 通過的建議可套用（維持原參數）。")
-                    if _plan["skipped"]:
-                        st.caption("未套用（安全閘）：" + "、".join(
-                            f"{n}（{r}）" for n, r in _plan["skipped"]))
-
-        # 精簡 KPI（4 個）
-        s = summary.iloc[0]
-        cols = st.columns(4)
-        cols[0].metric("進場候選", int(s.get("進場檔數", 0)), help=HELP["signal"])
-        cols[1].metric("觀察", int(s.get("觀察檔數", 0)), help=HELP["signal"])
-        cols[2].metric("掃描", int(s.get("掃描股票數", 0)))
-        cols[3].metric("耗時 (秒)", s.get("執行秒數", "—"))
-
-        st.markdown("### 完整結果")
-        filtered = render_results_table(df, key_prefix="scan_")
-
-        dl_col1, dl_col2 = st.columns(2)
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            filtered.to_excel(writer, sheet_name="篩選結果", index=False)
-            df.to_excel(writer, sheet_name="全部分析結果", index=False)
-            summary.to_excel(writer, sheet_name="Report摘要", index=False)
-            if failed_df is not None and len(failed_df) > 0:
-                failed_df.to_excel(writer, sheet_name="錯誤清單", index=False)
-        buf.seek(0)
-        dl_col1.download_button(
-            "下載 Excel 報告", data=buf.getvalue(),
-            file_name="台股分析報告.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        if dl_col2.button("寫入專案目錄", use_container_width=True):
-            cfg = st.session_state.get("cfg", base_cfg)
-            out = cfg["output"]
-            path = write_excel(df, summary, failed_df, out["dir"], out["prefix"])
-            st.success(f"已輸出：{path}")
-
-        if failed_df is not None and len(failed_df) > 0:
-            with st.expander(f"錯誤清單（{len(failed_df)} 筆）"):
-                st.dataframe(failed_df, use_container_width=True, hide_index=True)
+    result = st.session_state["result"]
+    df = result["df"]
+    market_state = result.get("market_state")
+    lead, sub, tone = _headline(df, market_state)
+    conclusion(lead, sub, tone)
+    s = result["summary"].iloc[0]
+    mode_name = sb.mode_labels.get(st.session_state.get("_result_mode", "breakout"), "")
+    asof(f"資料截至 {st.session_state.get('last_scan_at', '')} · 策略：{mode_name} · "
+         f"掃描 {int(s.get('掃描股票數', 0))} 檔 · 耗時 {s.get('執行秒數', '—')} 秒")
+    kpi_row([
+        ("達進場標準", f"{int(s.get('進場檔數', 0))}", "挑 1–2 檔"),
+        ("觀察", f"{int(s.get('觀察檔數', 0))}", "條件差一點"),
+        ("不操作 / 未通過過濾", f"{int(len(df) - s.get('進場檔數', 0) - s.get('觀察檔數', 0))}",
+         f"其中 {int((df['訊號判斷'] == '無法分析').sum())} 檔沒通過品質過濾" if "訊號判斷" in df else None),
+        ("大盤", (market_state or {}).get("label", "—").replace("🟢", "").replace("🔴", "")
+         .replace("🟡", "").strip() or "—", None),
+    ])
+    st.markdown("### 結果")
+    picked = _table(df)
+    if picked is not None:
+        st.markdown("### 交易計畫")
+        stock_detail(picked, key=f"scan_{picked.get('股票')}")
+    _advanced(result, df)

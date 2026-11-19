@@ -1,7 +1,6 @@
 """側欄 UI。回傳 SidebarState 給需要「資料來源 / 開始掃描」的分頁使用。"""
 from dataclasses import dataclass, field
 
-import pandas as pd
 import streamlit as st
 
 from twscanner.storage import cloud as store
@@ -116,11 +115,21 @@ def render_sidebar():
             st.rerun()
 
         st.markdown("")
-        run_btn = st.button("🔍 開始掃描", type="primary", use_container_width=True)
+        run_btn = st.button("開始掃描", type="primary", use_container_width=True)
 
         st.divider()
 
-        with st.expander("部位與風控", expanded=True):
+        with st.expander("資金、風險與月目標", expanded=False):
+            st.number_input(
+                "月目標（元）", min_value=0, step=1_000, key="month_target",
+                value=int(st.session_state.get("month_target", 10_000)),
+                help="每月希望賺多少。系統用它推算每月要做幾筆，不會因此放大單筆風險。",
+            )
+            st.number_input(
+                "每月虧損上限（R）", min_value=1.0, max_value=6.0, step=0.5, key="loss_limit_r",
+                value=float(st.session_state.get("loss_limit_r", 2.0)),
+                help="本月已實現虧損達到幾筆停損的量就停手。1R = 一筆交易的最大虧損。",
+            )
             st.number_input(
                 "總資金（元）", min_value=100_000,
                 value=int(base_cfg.get("position_sizing", {}).get("total_capital", 1_000_000)),
@@ -230,14 +239,14 @@ def render_sidebar():
                 if _owner:
                     ok, msg = store.ping()
                     if ok:
-                        st.success("🔗 雲端連線正常")
+                        st.success("雲端連線正常")
                         try:
                             _n = len(store.load_holdings(_owner) or [])
                         except Exception:
                             _n = 0
                         st.caption(f"雲端持股：{_n} 筆")
                     else:
-                        st.error(f"⚠ 雲端連線失敗：{msg}")
+                        st.error(f"雲端連線失敗：{msg}")
                         st.caption("→ 多半是 DATABASE_URL 連線字串有誤（見下方提示）。持股暫存本機。")
                     cb1, cb2 = st.columns(2)
                     if cb1.button("⬆ 立即存雲端", use_container_width=True):
@@ -273,50 +282,25 @@ def render_sidebar():
                             st.error("密碼錯誤或未設定 APP_PASSCODE")
 
         with st.expander("偏好設定", expanded=False):
+            st.radio(
+                "漲跌顏色", ["tw", "us"], key="color_mode", horizontal=True,
+                format_func=lambda k: {"tw": "紅漲綠跌（台股）", "us": "綠漲紅跌（美股）"}[k],
+                help="全站的漲跌、損益、多空燈號都依此上色。",
+            )
             st.caption("儲存後下次啟動會自動套用")
             if st.button("儲存目前設定", use_container_width=True):
                 ok = save_prefs({
                     "preset": st.session_state.get("preset", "balanced"),
                     "total_capital": int(st.session_state.get("total_capital", 1_000_000)),
+                    "month_target": int(st.session_state.get("month_target", 10_000)),
+                    "loss_limit_r": float(st.session_state.get("loss_limit_r", 2.0)),
+                    "color_mode": st.session_state.get("color_mode", "tw"),
                     "onboarded": True,
                 })
                 if ok:
                     st.success("已儲存")
                 else:
                     st.error("儲存失敗")
-
-        # 待處理 chip
-        if st.session_state["watchlist"]:
-            st.divider()
-            st.markdown("### 待處理")
-            codes = " ".join(
-                [f"<span class='watch-chip'>{w['code']}</span>"
-                 for w in st.session_state["watchlist"]]
-            )
-            st.markdown(f"<div class='watch-chips'>{codes}</div>",
-                         unsafe_allow_html=True)
-            st.caption(f"{len(st.session_state['watchlist'])} 檔待加入持股")
-            if st.button("→ 加入持股", use_container_width=True):
-                # 把 watchlist 內容轉成持股 DataFrame
-                if "holdings_df" not in st.session_state:
-                    st.session_state["holdings_df"] = pd.DataFrame(columns=[
-                        "股票代號", "公司名稱", "成本價", "持有股數",
-                    ])
-                new_rows = []
-                for w in st.session_state["watchlist"]:
-                    new_rows.append({
-                        "股票代號": w["code"],
-                        "公司名稱": w.get("name", ""),
-                        "成本價": w.get("entry", 0.0),
-                        "持有股數": int(w.get("lots", 1)) * 1000,
-                    })
-                new_df = pd.DataFrame(new_rows)
-                st.session_state["holdings_df"] = pd.concat(
-                    [st.session_state["holdings_df"], new_df], ignore_index=True,
-                )
-                st.session_state["watchlist"] = []
-                st.success(f"已加入 {len(new_rows)} 檔到持股管理")
-                st.rerun()
 
     return SidebarState(
         mode=mode, uploaded=uploaded, universe_kind=universe_kind,

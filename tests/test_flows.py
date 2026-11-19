@@ -114,6 +114,6 @@ def test_streak_and_summary_smoke():
 
 def test_risk_appetite_label():
     st = pd.DataFrame({"20日變化%": [1.0, 2.0, 0.5, -1.0], "站上50日線": [True, True, True, False]})
-    assert F.risk_appetite_label(st)[0].startswith("🟢")
+    assert F.risk_appetite_label(st)[0].startswith("Risk-on")
     st2 = pd.DataFrame({"20日變化%": [-1.0, -2.0, -0.5, 1.0], "站上50日線": [False, False, False, True]})
-    assert F.risk_appetite_label(st2)[0].startswith("🔴")
+    assert F.risk_appetite_label(st2)[0].startswith("Risk-off")

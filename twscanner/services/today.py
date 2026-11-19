@@ -123,6 +123,8 @@ def build_today(market_state, scan_df, holdings_df, trades_computed, cfg, month,
     regime = (market_state or {}).get("regime")
     if regime == "bear":
         reasons.append("台股大盤空頭：策略只做多，空頭時休息是最好的操作。")
+    elif regime in (None, "unknown"):
+        reasons.append("還不知道今天的大盤狀態（資料暫時抓不到）：確認大盤前先不開新倉。")
     if prog["stop_trading"]:
         reasons.append(f"本月已達虧損上限 {loss_limit_r:.0f}R。")
     if risk["risk_pct"] is not None and risk["risk_pct"] > max_risk_pct:

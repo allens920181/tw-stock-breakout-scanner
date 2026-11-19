@@ -33,7 +33,7 @@ def apply_and_rescan(toast_msg="已套用設定"):
             new_result["scan_cache"] = st.session_state["scan_cache"]
             st.session_state["result"] = new_result
             st.session_state["cfg"] = cfg2
-            st.toast(f"{toast_msg}，已自動重掃 → 切到「📈 買入掃描」看結果", icon="✅")
+            st.toast(f"{toast_msg}，已用現有資料重新評估 → 到「找標的」看結果", icon="✅")
         except Exception as e:
             st.toast(f"{toast_msg}（重掃失敗：{e}）", icon="⚠")
     else:

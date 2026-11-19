@@ -4,6 +4,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from twscanner.ui.format import colors, rgba
+
 
 def render_edge_meter(expectancy):
     """期望值 R 燈號條"""
@@ -17,24 +19,24 @@ def render_edge_meter(expectancy):
     pct = (val + 0.5) / 1.5 * 100  # 映射到 0-100
 
     if e < 0:
-        label = "無 edge"
-        color = "#DC2626"
+        label = "沒有優勢"
+        color = colors()["down"]
     elif e < 0.2:
-        label = "偏弱"
-        color = "#D97706"
+        label = "優勢偏弱"
+        color = colors()["flat"]
     elif e < 0.5:
-        label = "有 edge"
-        color = "#059669"
+        label = "有優勢"
+        color = colors()["up"]
     else:
-        label = "強 edge"
-        color = "#15803D"
+        label = "優勢明顯"
+        color = colors()["up"]
 
     st.markdown(
         f"""
 <div style='background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:12px 16px;'>
   <div style='display:flex; justify-content:space-between; margin-bottom:8px;'>
-    <span style='color:#64748B; font-size:0.78rem; font-weight:500;'>策略 Edge</span>
-    <span style='color:{color}; font-size:0.85rem; font-weight:600;'>{label}（期望值 {e:.2f} R）</span>
+    <span style='color:#64748B; font-size:0.78rem; font-weight:500;'>策略優勢（期望值）</span>
+    <span style='color:{color}; font-size:0.85rem; font-weight:600;'>{label}（{e:+.2f}R）</span>
   </div>
   <div style='background:#F1F5F9; height:8px; border-radius:4px; position:relative; overflow:hidden;'>
     <div style='position:absolute; left:{(0.5/1.5)*100:.0f}%; width:1px; height:100%; background:#94A3B8;'></div>
@@ -80,8 +82,8 @@ def render_drawdown_chart(trades):
     fig.add_trace(
         go.Scatter(
             x=trades["entry_date"], y=trades["drawdown"], mode="lines",
-            line=dict(color="#DC2626", width=1.5),
-            fill="tozeroy", fillcolor="rgba(220, 38, 38, 0.15)",
+            line=dict(color=colors()["down"], width=1.5),
+            fill="tozeroy", fillcolor=rgba(colors()["down"], 0.12),
             name="Drawdown",
         ),
         row=2, col=1,
@@ -105,11 +107,11 @@ def render_monthly_returns(trades):
     df["entry_date"] = pd.to_datetime(df["entry_date"])
     df["month"] = df["entry_date"].dt.to_period("M").astype(str)
     monthly = df.groupby("month")["r_multiple"].sum().reset_index()
-    colors = ["#059669" if v >= 0 else "#DC2626" for v in monthly["r_multiple"]]
+    bar_colors = [colors()["up"] if v >= 0 else colors()["down"] for v in monthly["r_multiple"]]
 
     fig = go.Figure(go.Bar(
         x=monthly["month"], y=monthly["r_multiple"],
-        marker_color=colors, marker_line_width=0,
+        marker_color=bar_colors, marker_line_width=0,
     ))
     fig.update_layout(
         height=260, margin=dict(l=8, r=8, t=8, b=8),

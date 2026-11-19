@@ -300,15 +300,15 @@ def _flow_signal(row):
     outflow = (cm is not None and not pd.isna(cm) and cm < -0.05)
     hot = (vol is not None and not pd.isna(vol) and vol >= 1.3)
     if q in ("leading", "improving") and inflow:
-        s = "🟢 流入"
+        s = "流入"
     elif q in ("lagging", "weakening") and outflow:
-        s = "🔴 流出"
+        s = "流出"
     elif inflow:
-        s = "🟡 偏流入"
+        s = "偏流入"
     elif outflow:
-        s = "🟠 偏流出"
+        s = "偏流出"
     else:
-        s = "⚪ 中性"
+        s = "中性"
     return s + ("（爆量）" if hot else "")
 
 
@@ -357,15 +357,15 @@ def risk_appetite_label(stats):
     up = int(((stats["20日變化%"].fillna(0) > 0) & stats["站上50日線"]).sum())
     down = int(((stats["20日變化%"].fillna(0) < 0) & ~stats["站上50日線"]).sum())
     if up >= 3:
-        lab = "🟢 Risk-on（資金追逐風險資產）"
+        lab = "Risk-on（資金追逐風險資產）"
     elif down >= 3:
-        lab = "🔴 Risk-off（資金躲進防禦/避險）"
+        lab = "Risk-off（資金躲進防禦/避險）"
     elif up > down:
-        lab = "🟡 偏 Risk-on"
+        lab = "偏 Risk-on"
     elif down > up:
-        lab = "🟠 偏 Risk-off"
+        lab = "偏 Risk-off"
     else:
-        lab = "⚪ 方向不明"
+        lab = "方向不明"
     return lab, up, down
 
 

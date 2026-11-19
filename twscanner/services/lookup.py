@@ -1,8 +1,10 @@
 """單檔快速查詢（免跑全市場）：技術/籌碼/營收快照 + 有成本時給出場建議"""
 import logging
 
+from twscanner.analysis.health import health_report
 from twscanner.core import cache as cache_mod
 from twscanner.data.chips import fetch_chips
+from twscanner.data.fundamentals import fetch_fundamentals
 from twscanner.data.prices import (
     resolve_markets_and_data,
 )
@@ -18,8 +20,8 @@ log = logging.getLogger(__name__)
 def run_single_lookup(code, cfg, company_name="", entry_price=None,
                       entry_date=None, with_bigmoney=False, progress_cb=None):
     """
-    個股快速查詢：抓單檔的價量＋籌碼＋營收＋大盤，回傳
-      {symbol, name, scoring(買入視角), holding(出場視角，有成本才算)}
+    個股健檢：抓單檔的價量＋籌碼＋營收＋財報＋大盤，回傳
+      {symbol, name, scoring(買入視角), holding(出場視角，有成本才算), health(財報白話健檢)}
     免跑全市場掃描；資料源各自快取，同日第二次查很快。
     """
     def emit(p, msg):
@@ -92,7 +94,8 @@ def run_single_lookup(code, cfg, company_name="", entry_price=None,
     except Exception as e:
         log.warning("查詢大盤失敗：%s", e)
 
-    current_price = float(df["Close"].iloc[-1])
+    # yfinance 盤中/收盤前常附一列 Close 為 NaN 的當日資料 → 取最後一個有效收盤
+    current_price = float(df["Close"].dropna().iloc[-1])
     name = r["company_name"] or company_name or code
 
     emit(0.85, "分析")
@@ -114,8 +117,18 @@ def run_single_lookup(code, cfg, company_name="", entry_price=None,
             strong_vol_mult=hcfg.get("strong_vol_mult", 1.5),
             chips=chips, revenue=revenue, market_state=market_state)
 
+    emit(0.95, "財報健檢")
+    fund = None
+    try:
+        fund = fetch_fundamentals(cfg["data"]["cache_dir"],
+                                  verify=cfg.get("revenue", {}).get("verify_ssl", True)).get(fixed)
+    except Exception as e:
+        log.warning("查詢財報失敗：%s", e)
+    health = health_report(fund, revenue, price=current_price)
+
     emit(1.0, "完成")
     return {"symbol": sym, "name": name, "scoring": scoring,
-            "holding": holding, "df": df, "market_state": market_state}
+            "holding": holding, "df": df, "market_state": market_state,
+            "fundamentals": fund, "revenue": revenue, "health": health}
 
 

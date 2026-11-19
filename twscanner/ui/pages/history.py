@@ -1,4 +1,4 @@
-"""🕘 歷史掃描與訊號實戰績效分頁。"""
+"""實戰績效（前向訊號日誌）與掃描歷史（策略驗證頁的分頁）。"""
 
 import pandas as pd
 import streamlit as st
@@ -11,9 +11,9 @@ from twscanner.ui.state import cloud_owner
 
 
 def render():
-    """🕘 歷史 / 訊號實戰績效"""
+    """實戰績效與掃描歷史"""
     # ===== 訊號實戰績效（live OOS）=====
-    st.markdown("### 📊 訊號實戰績效（live OOS）")
+    st.markdown("### 實戰績效：系統發出的訊號後來怎麼樣")
     st.caption(
         "回測是歷史模擬；**這裡是真帳**——每次掃描的「進場」清單自動存檔，"
         "用後續真實價格量**實際 R**，檢查系統實戰準不準。樣本要時間累積，越跑越準。"
@@ -49,11 +49,11 @@ def render():
         m[3].metric("進行中", s["進行中"])
         _exp = s["已結案期望值R"]
         if s["已結案"] and s["已結案"] < 20:
-            st.warning(f"⚠ 已結案僅 {s['已結案']} 筆 — 樣本太少，數字僅供參考，繼續累積。")
+            st.warning(f"已結案僅 {s['已結案']} 筆 — 樣本太少，數字僅供參考，繼續累積。")
         elif _exp is not None and _exp > 0:
-            st.success(f"✅ 實戰已結案期望值 +{_exp}R（{s['已結案']} 筆）— 系統在真實市場有正 edge。")
+            st.success(f"實戰已結案期望值 +{_exp}R（{s['已結案']} 筆）— 系統在真實市場有正的期望值。")
         elif _exp is not None:
-            st.error(f"❌ 實戰期望值 {_exp}R（{s['已結案']} 筆）— 與回測落差大，檢視參數是否過擬合。")
+            st.error(f"實戰期望值 {_exp}R（{s['已結案']} 筆）— 與回測落差大，檢視參數是否過擬合。")
         if je["evaluated"]:
             jdf = pd.DataFrame(je["evaluated"])
             view_cols = [c for c in [

@@ -185,3 +185,5 @@ def test_build_today_gates():
     assert not t["can_open"] and "空頭" in t["reasons"][0]
     t = build_today({"regime": "bull"}, None, None, None, cfg, "2026-11")
     assert "還沒掃描" in t["headline"]
+    t = build_today(None, _scan(), None, None, cfg, "2026-11")      # 大盤未知 → 不能說可以開倉
+    assert not t["can_open"] and "大盤狀態" in t["reasons"][0]

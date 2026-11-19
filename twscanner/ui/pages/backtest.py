@@ -1,4 +1,4 @@
-"""🧪 回測 / 因子 / 壓力測試 / 參數校準分頁。"""
+"""回測 / 壓力測試 / 自動校準 / 進階驗證（策略驗證頁的「回測」分頁）。"""
 import io
 import logging
 import tempfile
@@ -18,19 +18,21 @@ from twscanner.services import (
     run_sensitivity,
     run_stress_test,
 )
+from twscanner.ui.components.blocks import conclusion, kpi_row, signed_value
 from twscanner.ui.components.charts import (
     render_drawdown_chart,
     render_edge_meter,
     render_monthly_returns,
 )
 from twscanner.ui.components.common import fmt_int, make_progress_block
+from twscanner.ui.format import colors, strip_icon
 from twscanner.ui.glossary import HELP
 from twscanner.ui.settings import apply_and_rescan, build_cfg
 from twscanner.ui.state import get_base_config, persist_calibration_date
 
 
 def render(sb):
-    """🧪 回測 / 研究"""
+    """回測 / 研究"""
     base_cfg = get_base_config()
     mode, uploaded, universe_kind = sb.mode, sb.uploaded, sb.universe_kind
     st.markdown("### 回測設定")
@@ -112,123 +114,99 @@ def render(sb):
         finally:
             logging.getLogger().removeHandler(handler)
         bar.progress(1.0, text="回測完成")
+        # 今日決策在前面的分頁已經畫完了，重跑一次讓它用到新的回測統計
+        if "backtest_result" in st.session_state:
+            st.rerun()
 
     st.divider()
 
     if "backtest_result" not in st.session_state:
-        st.info("設定參數後點「**跑回測**」")
+        conclusion("還沒有回測結果",
+                   "設定天數後按「跑回測」。回測會用目前側欄的策略與參數，模擬過去每一天照系統進出場的結果。",
+                   "info")
     else:
         bt = st.session_state["backtest_result"]
         s = bt["summary"]
-
-        # Edge 燈號條（全寬）
-        _costs_on = st.session_state.get("cost_enabled", True)
-        st.caption("📊 報酬已扣來回交易成本" if _costs_on else "⚠ 未計交易成本（期望值偏樂觀）")
-        st.caption(
-            "⚠ **生存者偏差**：回測只跑「現在仍上市」的股票，已下市/被清洗的不在內，"
-            "故期望值**天生偏樂觀**。請用『📊 訊號實戰績效(live OOS)』與壓力測試交叉驗證，"
-            "並對回測數字打折理解。")
-        render_edge_meter(s["期望值R"])
-        st.markdown("")
-
-        # KPI
-        c = st.columns(4)
-        c[0].metric("總交易數", fmt_int(s["總交易數"]),
-                      help="回測期間累計模擬交易筆數")
-        c[1].metric("勝率 %", f"{s['勝率%']}%",
-                     delta=f"{s['勝率%']-50:.1f}%" if s["勝率%"] else None,
-                     help=HELP["win_rate"])
-        c[2].metric("平均 R", s["平均R"], help=HELP["avg_r"])
-        c[3].metric("最大回撤 R", s["最大回撤R"], help=HELP["max_dd_r"])
-
-        c2 = st.columns(3)
-        c2[0].metric("平均報酬 %", f"{s['平均報酬%']}%",
-                       help="每筆交易報酬% 的平均")
-        c2[1].metric("最大單筆 %", f"{s['最大單筆%']}%",
-                       help="所有交易中單筆最大獲利%")
-        c2[2].metric("期望值 R", s["期望值R"], help=HELP["expectancy_r"])
-
-        # 統計顯著性
-        if "期望值R_CI下界" in s:
-            ci_txt = f"期望值R 95% CI = [{s['期望值R_CI下界']}, {s['期望值R_CI上界']}]"
-            if s.get("顯著正Edge"):
-                st.success(f"✅ {ci_txt}（下界 > 0，達顯著正 edge）")
-            else:
-                st.warning(f"⚠ {ci_txt}（CI 跨 0，未達顯著 — 勿據此調參）")
-            if s.get("樣本警示"):
-                st.warning(f"⚠ 樣本可信度：{s.get('樣本可信度', '')} — 統計噪音大，勿過度解讀")
-            else:
-                st.caption(f"樣本可信度：{s.get('樣本可信度', '')}")
-
-        # 樣本外（OOS）驗證 — 最能代表真實期望值
         oos_split = bt.get("oos_split")
-        if oos_split and oos_split.get("n_oos", 0) > 0:
-            oos = oos_split["oos"]
-            st.markdown("#### 🎯 樣本外（OOS）— 只信這個")
-            st.caption("用前段資料挑參數、後段驗證；OOS 期望值才避開了選參偏誤。")
-            oc = st.columns(4)
-            oc[0].metric("OOS 交易數", fmt_int(oos["總交易數"]))
-            oc[1].metric("OOS 勝率 %", f"{oos['勝率%']}%")
-            oc[2].metric("OOS 平均 R", oos["平均R"])
-            oc[3].metric("OOS 期望值 R", oos["期望值R"])
-            if oos_split["n_oos"] < 30:
-                st.warning(f"⚠ OOS 僅 {oos_split['n_oos']} 筆（<30），期望值僅供參考")
-            elif oos.get("顯著正Edge"):
-                st.success(f"✅ OOS 期望值R CI = [{oos['期望值R_CI下界']}, {oos['期望值R_CI上界']}]，樣本外仍顯著為正")
-            else:
-                st.warning(f"⚠ OOS 期望值R CI = [{oos['期望值R_CI下界']}, {oos['期望值R_CI上界']}]，樣本外未達顯著")
-            with st.expander("樣本內 IS / 全體 對照"):
-                ist, ov = oos_split["is"], oos_split["overall"]
-                st.dataframe(pd.DataFrame([
-                    {"分組": "樣本內 IS", "交易數": ist["總交易數"], "勝率%": ist["勝率%"], "期望值R": ist["期望值R"]},
-                    {"分組": "樣本外 OOS", "交易數": oos["總交易數"], "勝率%": oos["勝率%"], "期望值R": oos["期望值R"]},
-                    {"分組": "全體", "交易數": ov["總交易數"], "勝率%": ov["勝率%"], "期望值R": ov["期望值R"]},
-                ]), use_container_width=True, hide_index=True)
-                st.caption("IS 因事後挑門檻而樂觀；IS 遠優於 OOS = 過擬合警訊。")
+        oos = oos_split["oos"] if oos_split and oos_split.get("n_oos", 0) > 0 else None
+        key = oos or s
+        e, n = key["期望值R"], key["總交易數"]
+        src = "樣本外" if oos else "全體"
+        if key.get("顯著正Edge"):
+            conclusion(f"有統計上顯著的優勢：{src}期望值 {e:+.2f}R（{n} 筆）",
+                       "照這套規則長期操作，平均每筆賺得比賠得多。仍要用實戰紀錄持續驗證。", "go")
+        elif e > 0:
+            conclusion(f"可能有優勢但還不能確定：{src}期望值 {e:+.2f}R（{n} 筆）",
+                       "信賴區間跨過 0，賺錢可能只是運氣。用小部位或模擬累積更多樣本。", "wait")
+        else:
+            conclusion(f"目前沒有證據顯示能賺錢：{src}期望值 {e:+.2f}R（{n} 筆）",
+                       "先不要用真錢照這組參數操作。可試其他策略模式、等大盤轉多，或用自動校準找穩定參數。", "stop")
+        render_edge_meter(s["期望值R"])
+        kpi_row([
+            ("交易筆數", fmt_int(s["總交易數"]), f"平均每筆 {s['平均報酬%']:+.2f}%"),
+            ("勝率", f"{s['勝率%']:.1f}%", f"最大單筆 {s['最大單筆%']:+.2f}%"),
+            ("期望值", signed_value(s["期望值R"], f"{s['期望值R']:+.2f}R"), "每筆平均賺幾倍風險"),
+            ("最大回撤", f"{s['最大回撤R']:.2f}R", "連續虧損最深的累積"),
+        ])
 
-        # 各大盤 Regime 拆解
+        st.markdown("### 這個結果可信嗎")
+        notes = []
+        if "期望值R_CI下界" in s:
+            notes.append(f"期望值 95% 信賴區間 [{s['期望值R_CI下界']}, {s['期望值R_CI上界']}]"
+                         + ("：下界 > 0，達顯著。" if s.get("顯著正Edge") else "：跨過 0，未達顯著，不要據此調參數。"))
+        notes.append(f"樣本可信度：{s.get('樣本可信度', '—')}。少於 30 筆的統計雜訊很大。")
+        notes.append("報酬已扣來回交易成本。" if st.session_state.get("cost_enabled", True)
+                     else "未計交易成本，期望值偏樂觀。")
+        notes.append("生存者偏差：只回測現在仍上市的股票，已下市的不在內，所以回測天生偏樂觀。"
+                     "請搭配「實戰績效」與壓力測試交叉驗證。")
+        st.markdown("\n".join(f"- {x}" for x in notes))
+        if oos:
+            ist, ov = oos_split["is"], oos_split["overall"]
+            st.caption("樣本外 = 用前段資料決定參數、後段資料驗證，最接近真實。樣本內遠好於樣本外 = 過度擬合。")
+            st.dataframe(pd.DataFrame([
+                {"分組": "樣本外（最可信）", "交易數": oos["總交易數"], "勝率%": oos["勝率%"], "期望值R": oos["期望值R"]},
+                {"分組": "樣本內", "交易數": ist["總交易數"], "勝率%": ist["勝率%"], "期望值R": ist["期望值R"]},
+                {"分組": "全體", "交易數": ov["總交易數"], "勝率%": ov["勝率%"], "期望值R": ov["期望值R"]},
+            ]), use_container_width=True, hide_index=True, column_config={
+                "勝率%": st.column_config.NumberColumn(format="%.1f%%"),
+                "期望值R": st.column_config.NumberColumn("期望值", format="%+.2fR")})
+
         by_regime = bt.get("by_regime")
         if by_regime is not None and len(by_regime):
-            st.markdown("### 各大盤 Regime 拆解")
-            st.caption("策略在空頭組的 edge 若大幅衰減 → 代表高度依賴大盤多頭，需靠大盤過濾保護。")
-            st.dataframe(
-                by_regime[["大盤狀態", "總交易數", "勝率%", "平均R", "期望值R", "最大回撤R"]],
-                use_container_width=True, hide_index=True,
-            )
+            st.markdown("### 不同大盤環境下的表現")
+            st.caption("如果空頭時期望值明顯變差，代表這個策略依賴多頭，空頭休息的規則就很重要。")
+            cc = colors()
+            labels = by_regime["大盤狀態"].map(strip_icon)
             fig_r = go.Figure(go.Bar(
-                x=by_regime["大盤狀態"], y=by_regime["期望值R"],
-                marker_color=["#059669" if v > 0.2 else ("#D97706" if v > 0 else "#DC2626")
-                               for v in by_regime["期望值R"]],
-                text=[f"{v:.2f}" for v in by_regime["期望值R"]],
+                x=labels, y=by_regime["期望值R"],
+                marker_color=[cc["up"] if v > 0 else cc["down"] for v in by_regime["期望值R"]],
+                text=[f"{v:+.2f}R（{int(nn)} 筆）" for v, nn in zip(by_regime["期望值R"], by_regime["總交易數"])],
                 textposition="outside", marker_line_width=0,
             ))
+            fig_r.add_hline(y=0, line=dict(color="#CBD5E1", width=1))
             fig_r.update_layout(
-                height=240, margin=dict(l=8, r=8, t=8, b=8),
-                plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
-                showlegend=False, yaxis_title="期望值 R",
-                font=dict(family="Inter, sans-serif", size=11),
-            )
+                height=260, margin=dict(l=8, r=8, t=16, b=8), plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                showlegend=False, yaxis=dict(visible=False),
+                font=dict(family="Inter, Noto Sans TC, sans-serif", size=12))
             fig_r.update_xaxes(showgrid=False)
-            fig_r.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
-            st.plotly_chart(fig_r, use_container_width=True,
-                             config={"displayModeBar": False})
+            st.plotly_chart(fig_r, use_container_width=True, config={"displayModeBar": False})
 
         if len(bt["trades"]):
-            st.markdown("### 累積 R 與 Drawdown")
+            st.markdown("### 累積損益（R）與回撤")
             render_drawdown_chart(bt["trades"])
 
-            st.markdown("### 月度 R 分布")
+            st.markdown("### 每月損益（R）")
             render_monthly_returns(bt["trades"])
 
             tcol1, tcol2 = st.columns(2)
             with tcol1:
-                st.markdown("### Top 10 個股")
+                st.markdown("### 表現最好的 10 檔")
                 st.dataframe(
                     bt["by_symbol"].head(10),
                     use_container_width=True, hide_index=True,
                 )
             with tcol2:
-                st.markdown("### Worst 10 個股")
+                st.markdown("### 表現最差的 10 檔")
                 st.dataframe(
                     bt["by_symbol"].tail(10).sort_values("期望值R"),
                     use_container_width=True, hide_index=True,
@@ -253,7 +231,7 @@ def render(sb):
 
             # ===== 敏感度（收合）=====
             st.divider()
-            with st.expander("🔬 敏感度分析（不同 min_score 的 edge·進階）", expanded=False):
+            with st.expander("敏感度分析：不同最低評分下的期望值", expanded=False):
                 st.caption("跑 min_score 4–7 各一次，比較不同門檻的 edge。需要先跑過一次回測。")
                 if st.button("跑敏感度", key="sens_btn"):
                     cfg = build_cfg()
@@ -279,7 +257,7 @@ def render(sb):
                     st.dataframe(sens_df, use_container_width=True, hide_index=True)
                     fig_s = go.Figure(go.Bar(
                         x=sens_df["min_score"], y=sens_df["期望值R"],
-                        marker_color=["#059669" if v > 0.2 else ("#D97706" if v > 0 else "#DC2626")
+                        marker_color=[colors()["up"] if v > 0 else colors()["down"]
                                        for v in sens_df["期望值R"]],
                         text=[f"{v:.2f}" for v in sens_df["期望值R"]],
                         textposition="outside", marker_line_width=0,
@@ -298,7 +276,7 @@ def render(sb):
 
             # ===== 壓力情境回測（滑價 ×N）=====
             st.divider()
-            st.markdown("### 🌪 壓力情境回測（滑價 ×N）")
+            st.markdown("### 壓力測試：成交價變差時還賺錢嗎")
             st.caption(
                 "平常滑價是「常態假設」；但小型股**跳空/漲停打開**時可能滑 1~3%。"
                 "把滑價放大重跑，看 edge 在**最壞成交**下是否還活著——存活才敢放大部位。"
@@ -338,20 +316,20 @@ def render(sb):
                 be, se = _g(b, "期望值R") or 0, _g(ss, "期望值R") or 0
                 st.caption(f"滑價 {sr['base_slippage_pct']*100:.2f}% → {sr['stress_slippage_pct']*100:.2f}%")
                 if se > 0:
-                    st.success(f"✅ 最壞成交下期望值仍為正（{se:.3f}R）— edge 穩健，可正常部位。")
+                    st.success(f"最壞成交下期望值仍為正（{se:.3f}R）— edge 穩健，可正常部位。")
                 elif be > 0:
-                    st.warning(f"⚠ 期望值由正（{be:.3f}R）轉為 {se:.3f}R — edge 對成本敏感，"
+                    st.warning(f"期望值由正（{be:.3f}R）轉為 {se:.3f}R — edge 對成本敏感，"
                                "宜降部位/只做高流動性標的。")
                 else:
-                    st.error("❌ 常態與壓力下期望值皆非正 — 此設定無穩健 edge，勿放大部位。")
+                    st.error("常態與壓力下期望值皆非正 — 此設定無穩健 edge，勿放大部位。")
 
             # ===== 自動校準（建議模式）=====
             st.divider()
-            st.markdown("### 🎯 自動校準（建議模式）")
+            st.markdown("### 自動校準")
             st.caption(
                 "把回測**回饋**到選股參數：系統算出建議值，**你一鍵套用**（不自動改）。"
                 "取「參數高原中心」非最高峰、避免過擬合；每項附 **OOS 同向檢核**——"
-                "樣本內決定、樣本外驗證，✅ 才建議套用。"
+                "樣本內決定、樣本外驗證，通過的才建議套用。"
             )
             _lastcal = st.session_state.get("last_calibrated_date")
             if _lastcal:
@@ -360,10 +338,10 @@ def render(sb):
                              - datetime.fromisoformat(_lastcal).date()).days
                     if _days < 20:
                         st.warning(
-                            f"🕒 上次校準在 {_days} 天前。**建議每月校準一次即可**——"
+                            f"上次校準在 {_days} 天前。**建議每月校準一次即可**——"
                             "校準太頻繁、反覆用同一段歷史挑參數，OOS 會被你看到失效（慢性過擬合）。")
                     else:
-                        st.caption(f"🕒 上次校準 {_days} 天前（建議每月一次）。")
+                        st.caption(f"上次校準 {_days} 天前（建議每月一次）。")
                 except Exception:
                     pass
             ac1, ac2 = st.columns([2, 1])
@@ -419,14 +397,14 @@ def render(sb):
                             "參數": _pl.get(p["param"], p["param"]),
                             "目前": p.get("current"),
                             "建議": p.get("recommended") if p.get("recommended") is not None else "—（無明顯高原）",
-                            "OOS同向": "✅" if oos else ("❌" if oos is False else "—"),
+                            "OOS同向": "✓ 是" if oos else ("✗ 否" if oos is False else "—"),
                         })
                     st.markdown("**進場門檻建議**（高原中心）")
                     st.dataframe(pd.DataFrame(rows), use_container_width=True,
                                  hide_index=True)
                     msc = next((p for p in ar["params"] if p["param"] == "min_score"), None)
                     atrp = next((p for p in ar["params"] if p["param"] == "atr_mult"), None)
-                    if st.button("✅ 套用門檻建議並重掃", key="apply_adapt_thr",
+                    if st.button("套用門檻建議並重掃", key="apply_adapt_thr",
                                  type="primary"):
                         applied = []
                         if msc and msc.get("recommended") is not None:
@@ -451,7 +429,7 @@ def render(sb):
                                  hide_index=True)
                     if w.get("note"):
                         st.caption(w["note"])
-                    if st.button("✅ 套用權重建議並重掃", key="apply_adapt_w",
+                    if st.button("套用權重建議並重掃", key="apply_adapt_w",
                                  type="primary"):
                         _m = {"breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",
                               "turnover_strong": "w_turnover", "kd": "w_kd", "macd": "w_macd",
@@ -478,7 +456,7 @@ def render(sb):
                     st.dataframe(pd.DataFrame(rrows), use_container_width=True,
                                  hide_index=True)
                     st.caption("套用後，每次掃描會**依當前大盤狀態自動選用**對應門檻（即時生效）。")
-                    if st.button("✅ 套用『隨大盤切門檻』並重掃", key="apply_adapt_regime",
+                    if st.button("套用『隨大盤切門檻』並重掃", key="apply_adapt_regime",
                                  type="primary"):
                         st.session_state["regime_thresholds"] = {
                             k: int(rg["by_regime"][k]["recommended"])
@@ -488,17 +466,17 @@ def render(sb):
                         apply_and_rescan("已啟用隨大盤切門檻")
                 if st.session_state.get("regime_thresholds"):
                     _rt = st.session_state["regime_thresholds"]
-                    st.success(f"✅ 隨大盤切門檻已啟用：{_rt}")
+                    st.success(f"隨大盤切門檻已啟用：{_rt}")
                     if st.button("停用隨大盤切門檻", key="clear_adapt_regime"):
                         st.session_state.pop("regime_thresholds", None)
                         st.rerun()
 
             # ===== 進階驗證工具（選用）=====
             st.divider()
-            st.markdown("#### 🔬 進階驗證工具（選用，點按鈕才執行）")
+            st.markdown("### 進階驗證工具（點按鈕才執行）")
             st.caption("日常只需上方『績效＋OOS＋壓力測試＋自動校準』；以下為深入研究用。")
 
-            st.markdown("##### 參數高原圖")
+            st.markdown("#### 參數高原圖")
             st.caption("掃一維參數看期望值曲線：**高原（一段都不錯）= 穩健**；**尖峰（只有一點好）= 過擬合**。建議取高原中點，別挑尖峰。")
             pl_param = st.radio(
                 "掃描參數", ["min_score", "atr_mult", "tp_mult"],
@@ -543,11 +521,11 @@ def render(sb):
                 ))
                 if pinfo["plateau"]:
                     lo, hi, center = pinfo["plateau"]
-                    fig_p.add_vrect(x0=lo, x1=hi, fillcolor="#059669", opacity=0.12, line_width=0)
+                    fig_p.add_vrect(x0=lo, x1=hi, fillcolor="#2563EB", opacity=0.10, line_width=0)
                 for pk in pinfo["peaks"]:
                     fig_p.add_trace(go.Scatter(
                         x=[ptab["param_value"].iloc[pk]], y=[ptab["期望值R"].iloc[pk]],
-                        mode="markers", marker=dict(color="#DC2626", size=12, symbol="x"),
+                        mode="markers", marker=dict(color="#B45309", size=12, symbol="x"),
                         name="尖峰(過擬合)", showlegend=False,
                     ))
                 fig_p.update_layout(
@@ -559,13 +537,13 @@ def render(sb):
                 fig_p.update_yaxes(showgrid=True, gridcolor="#F1F5F9")
                 st.plotly_chart(fig_p, use_container_width=True, config={"displayModeBar": False})
                 if pinfo["recommended"] is not None:
-                    st.success(f"✅ 建議穩健參數（高原中點）：**{pinfo['recommended']}**（綠色區段）")
+                    st.success(f"建議穩健參數（高原中點）：**{pinfo['recommended']}**（藍色區段）")
                 else:
-                    st.warning("⚠ 找不到明顯高原 — 曲線可能過於起伏（樣本不足或策略不穩），勿挑單一尖峰")
+                    st.warning("找不到明顯高原 — 曲線可能過於起伏（樣本不足或策略不穩），勿挑單一尖峰")
                 st.dataframe(ptab, use_container_width=True, hide_index=True)
 
             # ===== 因子增量貢獻驗證 =====
-            st.markdown("##### 因子驗證（增量貢獻）")
+            st.markdown("#### 因子驗證：每個條件的貢獻")
             st.caption("逐棒比較「因子成立 vs 不成立」的未來平均 R；lift(R) > 0 才代表該因子真的提升期望值。減法用：lift ≈ 0 或負的因子可考慮砍掉或降權。")
             if st.button("跑因子驗證", key="factor_btn"):
                 cfg = build_cfg()
@@ -606,7 +584,7 @@ def render(sb):
                     )
                     fig_f = go.Figure(go.Bar(
                         x=tbl["因子"], y=tbl["lift(R)"],
-                        marker_color=["#059669" if v > 0.02 else ("#D97706" if v > 0 else "#DC2626")
+                        marker_color=[colors()["up"] if v > 0 else colors()["down"]
                                        for v in tbl["lift(R)"]],
                         text=[f"{v:.3f}" for v in tbl["lift(R)"]],
                         textposition="outside", marker_line_width=0,
@@ -635,7 +613,7 @@ def render(sb):
                     st.dataframe(pd.DataFrame(sug["detail"]),
                                  use_container_width=True, hide_index=True)
                     st.caption(sug.get("note", ""))
-                    if st.button("✅ 套用建議權重並重掃", key="apply_lift_weights",
+                    if st.button("套用建議權重並重掃", key="apply_lift_weights",
                                  type="primary"):
                         _map = {
                             "breakout_with_volume": "w_breakout", "ma_bullish": "w_ma",

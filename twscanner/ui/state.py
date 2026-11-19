@@ -1,5 +1,6 @@
 """Streamlit 狀態與快取：設定/大盤/美股/代號名稱的快取載入、雲端登入、偏好、session 初始化。"""
 
+import pandas as pd
 import streamlit as st
 
 from twscanner.core.config import load_config
@@ -7,8 +8,9 @@ from twscanner.core.tz import today_tw
 from twscanner.data.universe import fetch_twse_universe
 from twscanner.market.tw_regime import classify_market
 from twscanner.market.us_regime import classify_us_market
-from twscanner.portfolio import journal
+from twscanner.portfolio import journal, trade_log
 from twscanner.storage import cloud as store
+from twscanner.storage import trades as trades_store
 from twscanner.storage.preferences import load_prefs, save_prefs
 
 
@@ -17,16 +19,40 @@ def get_base_config():
     return load_config("config.yaml")
 
 
-@st.cache_data(ttl=600)
+class _NotReady(Exception):
+    """資料暫時抓不到：丟例外讓 st.cache_data 不要把「未知」快取起來。"""
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _market_state():
+    cfg = get_base_config()
+    r = classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
+    if not r or r.get("regime") in (None, "unknown"):
+        raise _NotReady()
+    return r
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _us_state():
+    r = classify_us_market("1y", get_base_config()["data"]["cache_dir"])
+    if not r or r.get("regime") in (None, "unknown"):
+        raise _NotReady()
+    return r
+
+
 def get_market_state_cached():
-    cfg = get_base_config()
-    return classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
+    """台股大盤狀態；暫時抓不到時回 unknown，且不快取（下次互動會重試）。"""
+    try:
+        return _market_state()
+    except Exception:
+        return {"regime": "unknown", "label": "未知", "position_factor": 1.0, "detail": "大盤資料暫時抓不到"}
 
 
-@st.cache_data(ttl=1800)
 def get_us_state_cached():
-    cfg = get_base_config()
-    return classify_us_market("1y", cfg["data"]["cache_dir"])
+    try:
+        return _us_state()
+    except Exception:
+        return {"regime": "unknown", "label": "未知", "position_factor": 1.0, "detail": "美股資料暫時抓不到"}
 
 
 @st.cache_data(ttl=86400)
@@ -53,16 +79,6 @@ def persist_calibration_date():
         save_prefs(_p)
     except Exception:
         pass
-
-
-def add_to_watchlist(code, name, entry, lots):
-    existing = {w["code"] for w in st.session_state["watchlist"]}
-    if code in existing:
-        return False
-    st.session_state["watchlist"].append({
-        "code": code, "name": name, "entry": entry, "lots": lots,
-    })
-    return True
 
 
 # =====================================================
@@ -127,5 +143,56 @@ def bootstrap():
     if "preset" not in st.session_state:
         apply_preset(prefs.get("preset", "balanced"))
         st.session_state["total_capital"] = int(prefs.get("total_capital", 1_000_000))
-    if "watchlist" not in st.session_state:
-        st.session_state["watchlist"] = []
+    for key, default in (("month_target", 10_000), ("loss_limit_r", 2.0), ("color_mode", "tw")):
+        if key not in st.session_state:
+            st.session_state[key] = prefs.get(key, default)
+
+
+# =====================================================
+# 持股與交易紀錄（今日決策、找標的、持股頁共用）
+# =====================================================
+def add_holding(code, name, cost, shares):
+    """從交易計畫卡「我已買進」→ 加入持股編輯表（同代號則覆蓋成本與股數）。"""
+    cols = ["股票代號", "公司名稱", "成本價", "持有股數"]
+    df = st.session_state.get("holdings_df")
+    if df is None:
+        df = pd.DataFrame(columns=cols)
+    df = df[[c for c in cols if c in df.columns]].copy()
+    df = df[df["股票代號"].astype(str) != str(code)]
+    row = pd.DataFrame([{"股票代號": str(code), "公司名稱": name, "成本價": float(cost),
+                         "持有股數": int(shares)}])
+    st.session_state["holdings_df"] = pd.concat([df, row], ignore_index=True)
+    st.session_state["holdings_editor_version"] = st.session_state.get("holdings_editor_version", 0) + 1
+    owner = cloud_owner()
+    if owner and store.is_enabled():
+        store.save_holdings(owner, st.session_state["holdings_df"])
+
+
+def get_trades_df():
+    """已實現交易紀錄（原始欄位）。第一次讀取時從本機 / 雲端載入。"""
+    if "trades_df" not in st.session_state:
+        recs = trades_store.load_records(cloud_owner())
+        df = pd.DataFrame(recs) if recs else trade_log.empty()
+        for c in trade_log.COLUMNS:
+            if c not in df.columns:
+                df[c] = None
+        st.session_state["trades_df"] = df[trade_log.COLUMNS].astype({"股票代號": str})
+    return st.session_state["trades_df"]
+
+
+def save_trades_df(df):
+    df = df[[c for c in trade_log.COLUMNS if c in df.columns]].copy()
+    st.session_state["trades_df"] = df
+    recs = df.where(pd.notna(df), None).to_dict("records")
+    return trades_store.save_records(recs, cloud_owner())
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_sector_map():
+    """{代號: 產業}（組合風險的產業集中度用）。"""
+    from twscanner.data.sectors import fetch_sectors
+    cfg = get_base_config()
+    try:
+        return fetch_sectors(cfg["data"]["cache_dir"])
+    except Exception:
+        return {}

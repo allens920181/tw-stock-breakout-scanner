@@ -7,10 +7,10 @@ from twscanner.analysis.indicators import add_indicators
 
 
 def make_kline(df, title="", entry=None, stop=None, target1=None, target2=None,
-               recent_bars=120):
+               recent_bars=120, up="#D7263D", down="#0B8457"):
     """
     K 棒 + MA + Volume + KD + MACD 四面板。
-    可選標示進場價/停損/目標水平線。
+    可選標示進場價/停損/目標水平線。up / down = 漲跌色（預設台股紅漲綠跌）。
     """
     if df is None or df.empty:
         return None
@@ -35,8 +35,8 @@ def make_kline(df, title="", entry=None, stop=None, target1=None, target2=None,
         go.Candlestick(
             x=df.index, open=df["Open"], high=df["High"],
             low=df["Low"], close=df["Close"],
-            increasing_line_color="#DC2626", decreasing_line_color="#059669",
-            increasing_fillcolor="#DC2626", decreasing_fillcolor="#059669",
+            increasing_line_color=up, decreasing_line_color=down,
+            increasing_fillcolor=up, decreasing_fillcolor=down,
             name="K", showlegend=False,
         ),
         row=1, col=1,
@@ -64,22 +64,22 @@ def make_kline(df, title="", entry=None, stop=None, target1=None, target2=None,
                        row=1, col=1)
         annot.append(("進場", entry, "#0F172A"))
     if stop is not None:
-        fig.add_hline(y=stop, line=dict(color="#DC2626", width=1, dash="dot"),
+        fig.add_hline(y=stop, line=dict(color=down, width=1, dash="dot"),
                        row=1, col=1)
-        annot.append(("停損", stop, "#DC2626"))
+        annot.append(("停損", stop, down))
     if target1 is not None:
-        fig.add_hline(y=target1, line=dict(color="#059669", width=1, dash="dot"),
+        fig.add_hline(y=target1, line=dict(color=up, width=1, dash="dot"),
                        row=1, col=1)
-        annot.append(("目標1", target1, "#059669"))
+        annot.append(("目標1", target1, up))
     if target2 is not None:
-        fig.add_hline(y=target2, line=dict(color="#15803D", width=1, dash="dot"),
+        fig.add_hline(y=target2, line=dict(color=up, width=1, dash="dot"),
                        row=1, col=1)
-        annot.append(("目標2", target2, "#15803D"))
+        annot.append(("目標2", target2, up))
 
     for label, y, color in annot:
         fig.add_annotation(
             x=df.index[-1], y=y, xref="x", yref="y",
-            text=f"{label} {y}", showarrow=False,
+            text=f"{label} {y:,.2f}", showarrow=False,
             font=dict(color=color, size=10),
             xshift=4, xanchor="left", bgcolor="rgba(255,255,255,0.85)",
             row=1, col=1,
@@ -87,7 +87,7 @@ def make_kline(df, title="", entry=None, stop=None, target1=None, target2=None,
 
     # ---- 成交量 ----
     colors = [
-        "#DC2626" if c >= o else "#059669"
+        up if c >= o else down
         for c, o in zip(df["Close"], df["Open"])
     ]
     fig.add_trace(
@@ -114,7 +114,7 @@ def make_kline(df, title="", entry=None, stop=None, target1=None, target2=None,
     fig.add_hline(y=20, line=dict(color="#94A3B8", width=0.5, dash="dot"), row=3, col=1)
 
     # ---- MACD ----
-    osc_colors = ["#DC2626" if v >= 0 else "#059669" for v in df["OSC"]]
+    osc_colors = [up if v >= 0 else down for v in df["OSC"]]
     fig.add_trace(
         go.Bar(x=df.index, y=df["OSC"], marker_color=osc_colors,
                name="OSC", showlegend=False, marker_line_width=0),

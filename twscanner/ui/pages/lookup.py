@@ -1,144 +1,189 @@
-"""🔎 個股快速查詢分頁。"""
+"""個股健檢：這檔現在能不能買、手上的該不該賣、公司體質如何（財報白話）、K 線。"""
+import html
 
-import pandas as pd
 import streamlit as st
 
+from twscanner.reporting.kline import make_kline
 from twscanner.services import run_single_lookup
+from twscanner.services.today import trade_plan
+from twscanner.ui.components.blocks import (
+    action_badge,
+    asof,
+    buy_form,
+    callout,
+    conclusion,
+    kpi_row,
+    plan_card,
+    price_ladder_html,
+    signed_value,
+)
+from twscanner.ui.format import colors, fmt_pct, fmt_price, fmt_r, strip_icon
 from twscanner.ui.settings import build_cfg
 from twscanner.ui.state import get_code_name_map
+from twscanner.ui.theme import CHART_CONFIG
+
+VERDICT = {"good": ("良好", "up"), "neutral": ("普通", "info"), "bad": ("注意", "act-urgent"),
+           "na": ("不適用", "act-hold")}
+LESSON = {"revenue": "營運 › 月營收", "margin": "財報 › 毛利率", "op_income": "財報 › 本業與業外",
+          "eps": "財報 › EPS", "pe": "股票 › 本益比", "balance": "財報 › 資產負債表", "pb": "股票 › 股價淨值比"}
+
+
+def _search():
+    q1, q2, q3 = st.columns([1.4, 1.2, 0.8])
+    code = q1.text_input("股票代號", key="lookup_code", placeholder="例如 2330")
+    cost = q2.number_input("我的成本價（沒持有就留 0）", min_value=0.0, value=0.0, step=0.5, key="lookup_cost",
+                           help="填了才會給出場建議。沒填進場日時，系統以最近一次成交價觸及成本價的日子推估。")
+    q3.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    go = q3.button("健檢", type="primary", key="lookup_btn", use_container_width=True)
+    if go and code.strip():
+        with st.status("查詢中 …", expanded=False) as status:
+            try:
+                res = run_single_lookup(
+                    code.strip(), build_cfg(), company_name=get_code_name_map().get(code.strip(), ""),
+                    entry_price=cost if cost > 0 else None,
+                    progress_cb=lambda p, m: status.update(label=f"查詢中：{m}"))
+                st.session_state["lookup_result"] = res
+                status.update(label="完成", state="complete")
+            except Exception as e:
+                st.session_state["lookup_result"] = {"error": str(e)}
+                status.update(label=f"查詢失敗：{e}", state="error")
+    elif go:
+        st.warning("請輸入股票代號")
+
+
+def _lead(res):
+    sc, hd = res["scoring"], res.get("holding")
+    if hd:
+        act = strip_icon(hd.get("操作建議", ""))
+        urgent = hd.get("賣出量") in ("全出", "賣半")
+        return (f"持有中：{act}", f"{hd.get('說明', '')}", "stop" if urgent else "info")
+    signal = sc.get("訊號判斷")
+    if signal == "進場":
+        return (f"可以考慮進場：{sc.get('操作建議', '')}", sc.get("評級理由"), "go")
+    if signal == "觀察":
+        return (f"先觀察：{sc.get('操作建議', '')}", sc.get("評級理由"), "wait")
+    return (f"目前不建議買：{sc.get('操作建議', '') or '未達條件'}", sc.get("評級理由"), "wait")
+
+
+def _exit_section(hd):
+    st.markdown("### 出場建議")
+    urgent = hd.get("賣出量") in ("全出", "賣半")
+    ladder = price_ladder_html(hd.get("停損價"), hd.get("成本價"), hd.get("目標1(+1R半倉)"),
+                               hd.get("目標2(+2R出清)"), hd.get("目前價"))
+    st.markdown(
+        f"<div class='plan'><div class='top'><div class='name'>{action_badge(hd.get('操作建議'), urgent)}"
+        f"　賣出量：{hd.get('賣出量', '—')}</div><div>{fmt_r(hd.get('R倍數'))} · "
+        f"{signed_value(hd.get('報酬%'))}</div></div>"
+        f"<div class='grid'>"
+        + "".join(f"<div class='cell'><div class='l'>{lbl}</div><div class='v'>{fmt_price(hd.get(k))}</div></div>"
+                  for lbl, k in (("停損價", "停損價"), ("成本", "成本價"), ("+1R 賣一半", "目標1(+1R半倉)"),
+                                 ("+2R", "目標2(+2R出清)"), ("移動停利", "移動停利(ATR)")))
+        + f"</div>{ladder}<div class='rule'>{html.escape(str(hd.get('說明', '')))}<br>"
+        f"趨勢：{html.escape(str(hd.get('趨勢強度', '—')))} · 進場日：{html.escape(str(hd.get('進場日來源', '—')))}"
+        f"</div></div>", unsafe_allow_html=True)
+    if hd.get("主動警示") and hd["主動警示"] != "—":
+        callout(f"持股警示：{html.escape(str(hd['主動警示']))}")
+
+
+def _health_section(health):
+    st.markdown("### 公司體檢")
+    if not health or not health["items"]:
+        st.caption(health["summary"] if health else "查無財報資料。")
+        return
+    st.markdown(f"**{health['summary']}**　<span class='asof'>財報期間：{health['period']}（證交所最新公告）</span>",
+                unsafe_allow_html=True)
+    rows = []
+    for it in health["items"]:
+        label, cls = VERDICT[it["verdict"]]
+        rows.append(f"<div class='rowline'><div class='health-v'><span class='badge {cls}'>{label}</span></div>"
+                    f"<div class='main'><div class='t'>{it['name']}　<span class='num'>{it['value']}</span></div>"
+                    f"<div class='d'>{html.escape(it['plain'])}<br><span style='font-size:0.75rem'>看懂這個數字：學習中心 › "
+                    f"{LESSON.get(it['lesson'], '財報')}</span></div></div></div>")
+    st.markdown("".join(rows), unsafe_allow_html=True)
+    st.caption("對 1 個月內的短線操作，基本面用來「避開地雷」，進出場時機仍以技術面與交易計畫為準。")
+
+
+def _add_check(sc):
+    with st.expander("加碼檢查：現在加碼合理嗎？", expanded=False):
+        from twscanner.analysis.sizing import evaluate_add
+        cur = sc.get("目前現價") or sc.get("收盤價")
+        lots = st.number_input("想加幾張", min_value=1, max_value=100, value=1, step=1, key="add_lots")
+        ev = evaluate_add(build_cfg(), cur, sc.get("ATR14"), sc.get("乖離MA20%"),
+                          sc.get("相對強度RS%"), int(lots))
+        verdict = ev["verdict"].lstrip("🟢🟡🔴 ").strip()
+        st.markdown(f"**{verdict}**")
+        for b in ev["blocks"]:
+            st.markdown(f"- 不建議：{b}")
+        for w in ev["warns"]:
+            st.markdown(f"- 注意：{w}")
+        kpi_row([("加碼停損", fmt_price(ev["stop"]), None),
+                 ("每股風險", fmt_price(ev["risk_per_share"]), None),
+                 ("加碼風險", f"{ev['add_risk']:,.0f} 元" if ev["add_risk"] is not None else "—", None),
+                 ("佔資金", f"{ev['cost_pct']}%" if ev["cost_pct"] is not None else "—", None)])
+        st.caption("加碼原則：不追過度延伸的價格；加碼量不超過原部位；加碼後把整體停損上移，總風險守住單筆上限。")
 
 
 def render():
-    """🔎 個股快速查詢"""
-    st.markdown("### 🔎 個股快速查詢")
-    st.caption("輸入代號（可選填成本）→ 立即拿到現價/R/趨勢強度/出場建議＋籌碼/營收/RS，免跑全市場掃描。")
-
-    q1, q2, q3, q4 = st.columns([1.2, 1, 1, 1])
-    q_code = q1.text_input("股票代號", key="lookup_code", placeholder="如 1608")
-    q_cost = q2.number_input("成本價（可選）", min_value=0.0, value=0.0, step=0.01,
-                             key="lookup_cost", help="填了才會給『出場建議』；0=只看技術/籌碼快照")
-    q_date = q3.date_input("進場日（可選）", value=None, key="lookup_date",
-                           help="影響持有天數/波段高基準；不填用全段")
-    q_big = q4.checkbox("含大資金", value=False, key="lookup_big",
-                        help="多抓外資期貨/台幣/融資（較慢）")
-    look_btn = st.button("🔎 查詢", type="primary", key="lookup_btn")
-
-    if look_btn:
-        if not q_code.strip():
-            st.warning("請輸入股票代號")
-        else:
-            cfg = build_cfg()
-            barL = st.progress(0.0, text="查詢中 …")
-
-            def _lk_cb(p, msg):
-                try:
-                    barL.progress(min(p, 1.0), text=f"查詢：{msg}")
-                except Exception:
-                    pass
-            try:
-                try:
-                    _nm = get_code_name_map().get(q_code.strip(), "")
-                except Exception:
-                    _nm = ""
-                res = run_single_lookup(
-                    q_code.strip(), cfg, company_name=_nm,
-                    entry_price=(q_cost if q_cost > 0 else None),
-                    entry_date=q_date, with_bigmoney=q_big, progress_cb=_lk_cb)
-                st.session_state["lookup_result"] = res
-            except Exception as e:
-                st.session_state["lookup_result"] = {"error": str(e)}
-            barL.progress(1.0, text="完成")
-
+    _search()
     res = st.session_state.get("lookup_result")
-    if res:
-        if res.get("error"):
-            st.error(res["error"])
+    if not res:
+        conclusion("輸入代號做個股健檢",
+                   "會告訴你：現在能不能買（含完整交易計畫）、手上持有的該不該賣、這家公司的財報體質，"
+                   "每個數字都附白話說明。", "info")
+        return
+    if res.get("error"):
+        st.error(res["error"])
+        return
+    sc, hd = res["scoring"], res.get("holding")
+    lead, sub, tone = _lead(res)
+    st.markdown(f"## {res['name']} <span style='color:var(--muted);font-weight:500'>"
+                f"{res['symbol'].split('.')[0]}</span>", unsafe_allow_html=True)
+    conclusion(lead, sub, tone)
+    df = res.get("df")
+    if df is not None and len(df) > 1:
+        asof(f"價格資料截至 {df.index[-1]:%Y-%m-%d}")
+        chg = (df["Close"].iloc[-1] / df["Close"].iloc[-2] - 1) * 100
+    else:
+        chg = None
+    rev = res.get("revenue") or {}
+    price = sc.get("目前現價") or sc.get("收盤價")
+    if (price is None or price != price) and df is not None and len(df):
+        price = float(df["Close"].dropna().iloc[-1])
+    kpi_row([
+        ("現價", fmt_price(price),
+         signed_value(chg, fmt_pct(chg)) if chg is not None else None),
+        ("等級 / 分數", f"{sc.get('綜合評級') or '未評級'}",
+         f"{sc.get('評分顯示', sc.get('評分', '—'))} 分" if sc.get("綜合評級") else (sc.get("狀態") or None)),
+        ("比大盤強多少（60 日）", signed_value(sc.get("相對強度RS%"), fmt_pct(sc.get("相對強度RS%"))), None),
+        ("營收年增", signed_value(rev.get("yoy_pct"), fmt_pct(rev.get("yoy_pct"), 1))
+         if rev.get("yoy_pct") is not None else "—", None),
+    ])
+
+    if hd:
+        _exit_section(hd)
+    else:
+        st.markdown("### 交易計畫")
+        plan = trade_plan(sc)
+        if plan["entry"] and plan["stop"]:
+            plan_card(plan)
+            if sc.get("訊號判斷") in ("進場", "觀察"):
+                buy_form(plan, key=f"lookup_{plan['code']}")
         else:
-            sc = res["scoring"]
-            hd = res.get("holding")
-            st.markdown(f"#### {res['name']}　`{res['symbol']}`")
+            st.caption(f"目前沒有交易計畫：{sc.get('操作建議', '') or '未通過品質過濾'}"
+                       f"{'（' + str(sc.get('評級理由')) + '）' if sc.get('評級理由') else ''}")
 
-            # ---- 出場建議（有成本才顯示）----
-            if hd:
-                a1, a2, a3, a4 = st.columns(4)
-                a1.metric("現價", hd.get("目前價"))
-                a2.metric("報酬%", f"{hd.get('報酬%')}%" if hd.get("報酬%") is not None else "—")
-                a3.metric("R 倍數", hd.get("R倍數"))
-                a4.metric("趨勢強度", hd.get("趨勢強度", "—"))
-                _act = str(hd.get("操作建議", ""))
-                _cls = ("bull" if ("續抱" in _act or "強勢" in _act)
-                        else ("bear" if ("停損" in _act or "了結" in _act or "轉弱" in _act)
-                              else "neutral"))
-                st.markdown(
-                    f"<div class='hdr-advice {_cls}'><span class='dot'></span>"
-                    f"<b>出場建議</b>　{_act}（{hd.get('賣出量','—')}）— {hd.get('說明','')}</div>",
-                    unsafe_allow_html=True)
-                e1, e2, e3, e4 = st.columns(4)
-                e1.metric("停損價", hd.get("停損價"))
-                e2.metric("目標2(+2R)", hd.get("目標2(+2R出清)"))
-                e3.metric("移動停利ATR", hd.get("移動停利(ATR)"))
-                e4.metric("ADX", hd.get("ADX"))
-                if hd.get("主動警示") and hd["主動警示"] != "—":
-                    st.warning(f"⚠ 主動警示：{hd['主動警示']}")
-                st.divider()
+    _health_section(res.get("health"))
 
-            # ---- 技術 / 籌碼 / 基本面快照 ----
-            st.markdown("**快照（買入視角）**")
-            g1, g2, g3, g4 = st.columns(4)
-            g1.metric("綜合評級", sc.get("綜合評級", "—"))
-            g2.metric("評分", sc.get("評分顯示", sc.get("評分")))
-            g3.metric("相對強度RS%", sc.get("相對強度RS%"))
-            g4.metric("乖離MA20%", sc.get("乖離MA20%"))
-            g5, g6, g7, g8 = st.columns(4)
-            g5.metric("籌碼確認", sc.get("籌碼確認", "—"))
-            g6.metric("法人5日(張)", sc.get("法人5日累計(張)"))
-            g7.metric("營收動能", sc.get("營收動能", "—"))
-            g8.metric("換手率%", sc.get("換手率%"))
-            if sc.get("評級理由"):
-                st.caption(f"評級理由：{sc['評級理由']}")
-
-            with st.expander("更多欄位"):
-                show = {k: sc.get(k) for k in [
-                    "操作建議", "進場參考價", "停損價", "目標價1(+1R半倉)", "目標價2(+2R出清)",
-                    "外資買賣超(張)", "法人買賣超(張)", "法人連買天數",
-                    "月營收YoY%", "月營收MoM%", "融資券提示", "ADX",
-                    "MA20", "MA60", "K", "D", "成交量", "20日均量"] if k in sc}
-                st.dataframe(pd.DataFrame([show]).T.rename(columns={0: "值"}),
-                             use_container_width=True)
-
-            # ---- 近 5 日收盤 ----
-            dfx = res.get("df")
-            if dfx is not None and len(dfx):
-                closes = [round(float(x), 2) for x in dfx["Close"].iloc[-5:]]
-                st.caption("近 5 日收盤：" + " → ".join(str(c) for c in closes))
-
-            # ---- ➕ 加碼檢查 ----
-            with st.expander("➕ 加碼檢查（現價加碼是否合理）", expanded=False):
-                from twscanner.analysis.sizing import evaluate_add
-                cur_px = sc.get("目前現價") or sc.get("收盤價")
-                add_lots = st.number_input("想加幾張", min_value=1, max_value=100,
-                                           value=1, step=1, key="add_lots")
-                ev = evaluate_add(
-                    build_cfg(), cur_px, sc.get("ATR14"),
-                    sc.get("乖離MA20%"), sc.get("相對強度RS%"), int(add_lots))
-                _vc = ("bull" if ev["verdict"].startswith("🟢")
-                       else ("bear" if ev["verdict"].startswith("🔴") else "neutral"))
-                st.markdown(
-                    f"<div class='hdr-advice {_vc}'><span class='dot'></span>"
-                    f"<b>加碼判斷</b>　{ev['verdict']}</div>", unsafe_allow_html=True)
-                if ev["blocks"]:
-                    for b in ev["blocks"]:
-                        st.error("✕ " + b)
-                for w in ev["warns"]:
-                    st.warning("⚠ " + w)
-                ac1, ac2, ac3, ac4 = st.columns(4)
-                ac1.metric("加碼停損", ev["stop"])
-                ac2.metric("每股風險", ev["risk_per_share"])
-                ac3.metric("加碼風險", f"{ev['add_risk']:,.0f}" if ev["add_risk"] is not None else "—")
-                ac4.metric("佔資金%", f"{ev['cost_pct']}%" if ev["cost_pct"] is not None else "—")
-                if ev.get("max_lots_in_budget") is not None:
-                    st.caption(f"💡 此價在單筆風險預算內最多可加 **{ev['max_lots_in_budget']} 張**"
-                               f"（停損 {ev['stop']}，每股風險 {ev['risk_per_share']}）")
-                st.caption("加碼鐵律：過度延伸別追高；加碼量 ≤ 原倉、加後上移整體停損、總風險守單筆上限。")
-
-            st.caption("⚠ 決策輔助、非投資建議；籌碼/營收為當日 best-effort 資料。")
+    if df is not None and len(df) > 30:
+        st.markdown("### K 線")
+        c = colors()
+        src = hd or {}
+        fig = make_kline(df, title="", entry=src.get("成本價") or sc.get("進場參考價"),
+                         stop=src.get("停損價") or sc.get("停損價"),
+                         target1=src.get("目標1(+1R半倉)") or sc.get("目標價1(+1R半倉)"),
+                         target2=src.get("目標2(+2R出清)") or sc.get("目標價2(+2R出清)"),
+                         recent_bars=120, up=c["up"], down=c["down"])
+        if fig:
+            st.plotly_chart(fig, use_container_width=True, config=CHART_CONFIG)
+    _add_check(sc)
+    st.caption("決策輔助，非投資建議。籌碼、營收、財報為官方公開資料的當日快照。")

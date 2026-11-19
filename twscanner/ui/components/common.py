@@ -1,4 +1,4 @@
-"""共用小元件：格式化、Excel 模板下載、進度條 + 執行記錄、首次引導。"""
+"""共用小元件：格式化、Excel 模板下載、進度條 + 執行記錄、"""
 import io
 import logging
 
@@ -59,18 +59,3 @@ def make_progress_block(title):
         "%(asctime)s %(levelname)s: %(message)s", datefmt="%H:%M:%S",
     ))
     return bar, log_area, buf, handler
-
-
-def render_onboarding():
-    """首次使用者引導"""
-    st.markdown("""
-<div style='background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:20px 24px; margin-bottom:14px;'>
-<h3 style='margin-top:0; font-size:1rem;'>歡迎使用</h3>
-<p style='color:#64748B; font-size:0.9rem; margin-bottom:12px;'>三個步驟開始：</p>
-<ol style='color:#0F172A; font-size:0.9rem; margin:0; padding-left:20px; line-height:1.8;'>
-  <li>左側選一個 <b>風格 Preset</b>（保守 / 平衡 / 積極）</li>
-  <li>選擇資料來源（上傳清單或全台股），點 <b>開始掃描</b></li>
-  <li>從進場候選卡片點「<b>詳細</b>」看 K 線，或「<b>待處理</b>」加入清單，再到側欄一鍵轉入持股管理</li>
-</ol>
-</div>
-""", unsafe_allow_html=True)

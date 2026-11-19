@@ -50,6 +50,8 @@ def health_report(fund, rev=None, price=None):
     回 {period, items, counts, summary, red_flags, valuation}
     """
     fund = fund or {}
+    if price is not None and price != price:      # NaN
+        price = None
     items, flags = [], []
     is_fin = any(w in (fund.get("industry") or "") for w in _FIN_WORDS)
 
