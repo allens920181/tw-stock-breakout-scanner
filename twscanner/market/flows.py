@@ -32,9 +32,9 @@ import pandas as pd
 import requests
 
 from twscanner.core import cache as cache_mod
+from twscanner.core.tz import today_tw
 from twscanner.data.prices import yf  # 重用已設靜音的 yfinance
 from twscanner.data.sectors import fetch_sectors
-from twscanner.core.tz import today_tw
 
 log = logging.getLogger(__name__)
 

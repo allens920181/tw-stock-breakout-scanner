@@ -21,11 +21,10 @@
 import logging
 from datetime import timedelta
 
-from twscanner.core.tz import today_tw
-
 import requests
 
 from twscanner.core import cache as cache_mod
+from twscanner.core.tz import today_tw
 
 log = logging.getLogger(__name__)
 

@@ -282,7 +282,8 @@ def factor_correlation(data, lift_map=None, high_thresh=0.7):
     parent = {k: k for k in keys}
     def find(x):
         while parent[x] != x:
-            parent[x] = parent[parent[x]]; x = parent[x]
+            parent[x] = parent[parent[x]]
+            x = parent[x]
         return x
     for i in range(len(keys)):
         for j in range(i + 1, len(keys)):

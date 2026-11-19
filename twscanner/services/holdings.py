@@ -4,13 +4,13 @@ import logging
 import pandas as pd
 
 from twscanner.core import cache as cache_mod
+from twscanner.data.chips import fetch_chips
 from twscanner.data.prices import (
     resolve_markets_and_data,
 )
-from twscanner.data.chips import fetch_chips
 from twscanner.data.revenue import fetch_revenue
-from twscanner.portfolio.holdings import analyze_holding, load_holdings
 from twscanner.market.tw_regime import classify_market
+from twscanner.portfolio.holdings import analyze_holding, load_holdings
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,6 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
     )
     emit("下載資料", 0.70, f"定位 {len(resolved)} 檔")
 
-    sym_to_df = {r["symbol"]: r for r in resolved}
     code_to_resolved = {r["symbol"].split(".")[0]: r for r in resolved}
 
     # 持股期間主動示警所需的籌碼/營收/大盤（best-effort，失敗不影響出場規則）
@@ -70,8 +69,9 @@ def run_holdings_scan(holdings_path=None, cfg=None, progress_cb=None, holdings=N
             bm_cfg = cfg.get("bigmoney", {})
             if bm_cfg.get("enabled", True):
                 from datetime import timedelta
-                from twscanner.market.bigmoney import classify_bigmoney
+
                 from twscanner.core.tz import today_tw
+                from twscanner.market.bigmoney import classify_bigmoney
                 today = today_tw()
                 mdates = [(today - timedelta(days=k)).strftime("%Y%m%d") for k in range(0, 9)]
                 market_state["big_state"] = classify_bigmoney(

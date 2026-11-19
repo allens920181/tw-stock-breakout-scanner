@@ -3,7 +3,6 @@ import pandas as pd
 
 from twscanner.strategy.scoring import analyze_stock
 
-
 CFG = {
     "filters": {
         "min_price": 10,

@@ -3,8 +3,8 @@ import logging
 
 import yfinance as yf
 
-from twscanner.core import cache as cache_mod
 from twscanner.analysis.indicators import add_indicators
+from twscanner.core import cache as cache_mod
 
 log = logging.getLogger(__name__)
 

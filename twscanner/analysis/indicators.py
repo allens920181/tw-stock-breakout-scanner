@@ -1,3 +1,4 @@
+"""技術指標（純計算）：MA / KD / MACD / ATR / ADX 等，輸入輸出皆為 DataFrame。"""
 import numpy as np
 import pandas as pd
 

@@ -86,7 +86,8 @@ def _entry_stop_risk(rec):
     entry = rec.get("進場參考價")
     stop = rec.get("停損價")
     try:
-        entry = float(entry); stop = float(stop)
+        entry = float(entry)
+        stop = float(stop)
     except (TypeError, ValueError):
         return None, None, None
     risk = entry - stop
@@ -120,7 +121,7 @@ def evaluate_record(rec, df):
     max_r, min_r = None, None
     for i in range(len(after)):
         bar = after.iloc[i]
-        hi, lo, cl = float(bar["High"]), float(bar["Low"]), float(bar["Close"])
+        hi, lo = float(bar["High"]), float(bar["Low"])
         r_hi = (hi - entry) / risk
         r_lo = (lo - entry) / risk
         max_r = r_hi if max_r is None else max(max_r, r_hi)

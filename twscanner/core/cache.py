@@ -1,3 +1,4 @@
+"""本地當日快取：DataFrame → Parquet（失敗退 pickle）、任意物件 → pickle。檔名含台灣日期，隔日自動失效。"""
 import os
 import pickle
 

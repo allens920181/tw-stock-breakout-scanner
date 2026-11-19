@@ -14,9 +14,9 @@
 """
 import pandas as pd
 
-from twscanner.data.earnings import days_to_earnings
 from twscanner.analysis.indicators import add_indicators
 from twscanner.analysis.sizing import calc_position, calc_targets
+from twscanner.data.earnings import days_to_earnings
 
 
 def _empty(symbol, name, market, status):
@@ -59,9 +59,8 @@ def analyze_ambush(symbol, company_name, market, df, shares, cfg,
     # 換手率
     if shares and shares > 0:
         turnover_rate = latest["Volume"] / shares * 100
-        avg_turnover_20 = vol20 / shares * 100
     else:
-        turnover_rate = avg_turnover_20 = None
+        turnover_rate = None
 
     # ===== 潛伏條件（蓄勢彈簧）=====
     def _clip(x, lo=0.0, hi=1.0):

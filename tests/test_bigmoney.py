@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from twscanner.market.bigmoney import (
-    combine_bigmoney, parse_foreign_fut_oi, score_foreign_fut,
-    score_market_margin, score_twd,
+    combine_bigmoney,
+    parse_foreign_fut_oi,
+    score_foreign_fut,
+    score_market_margin,
+    score_twd,
 )
 from twscanner.market.us_regime import merge_position_factor
 

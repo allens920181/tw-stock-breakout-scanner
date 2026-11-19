@@ -1,16 +1,15 @@
 """單檔快速查詢（免跑全市場）：技術/籌碼/營收快照 + 有成本時給出場建議"""
 import logging
 
-
 from twscanner.core import cache as cache_mod
+from twscanner.data.chips import fetch_chips
 from twscanner.data.prices import (
     resolve_markets_and_data,
 )
-from twscanner.data.chips import fetch_chips
 from twscanner.data.revenue import fetch_revenue
 from twscanner.data.sectors import fetch_shares_official
-from twscanner.portfolio.holdings import analyze_holding
 from twscanner.market.tw_regime import classify_market
+from twscanner.portfolio.holdings import analyze_holding
 from twscanner.strategy.scoring import analyze_stock
 
 log = logging.getLogger(__name__)
@@ -81,8 +80,9 @@ def run_single_lookup(code, cfg, company_name="", entry_price=None,
             market_state = classify_market(cfg["data"]["period"], cfg["data"]["cache_dir"])
             if with_bigmoney and cfg.get("bigmoney", {}).get("enabled", True):
                 from datetime import timedelta
-                from twscanner.market.bigmoney import classify_bigmoney
+
                 from twscanner.core.tz import today_tw
+                from twscanner.market.bigmoney import classify_bigmoney
                 today = today_tw()
                 mdates = [(today - timedelta(days=k)).strftime("%Y%m%d") for k in range(0, 9)]
                 market_state["big_state"] = classify_bigmoney(

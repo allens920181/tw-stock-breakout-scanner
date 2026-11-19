@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-import numpy as np
 import pandas as pd
 
-from twscanner.portfolio.journal import (
-    evaluate_record, log_signals, summarize_journal, load_journal, save_journal,
-)
 from twscanner.portfolio.holdings import _holding_alerts
+from twscanner.portfolio.journal import (
+    evaluate_record,
+    load_journal,
+    log_signals,
+    summarize_journal,
+)
 
 
 def _df(prices, start="2024-01-02"):

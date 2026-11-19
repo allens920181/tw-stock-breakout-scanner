@@ -530,7 +530,8 @@ def render(sb):
 
             if "plateau" in st.session_state:
                 pl = st.session_state["plateau"]
-                ptab = pl["table"]; pinfo = pl["plateau"]
+                ptab = pl["table"]
+                pinfo = pl["plateau"]
                 fig_p = go.Figure()
                 fig_p.add_trace(go.Scatter(
                     x=ptab["param_value"], y=ptab["期望值R"], mode="lines+markers",

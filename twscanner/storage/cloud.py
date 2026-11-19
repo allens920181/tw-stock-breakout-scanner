@@ -48,6 +48,7 @@ def _connect():
         pass
     import ssl
     from urllib.parse import urlparse
+
     import pg8000.dbapi
     u = urlparse(_DSN)
     ctx = ssl.create_default_context()

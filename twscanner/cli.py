@@ -4,9 +4,9 @@ import logging
 import sys
 
 from twscanner.core.config import load_config
+from twscanner.data.universe import fetch_twse_universe
 from twscanner.reporting.excel import write_backtest_excel, write_excel
 from twscanner.services import run_backtest, run_scan
-from twscanner.data.universe import fetch_twse_universe
 
 
 def setup_logging(level, log_file=None):

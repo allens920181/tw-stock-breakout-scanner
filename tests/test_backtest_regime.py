@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from twscanner.research.backtest import _regime_at, summarize_by_regime
 from twscanner.market.tw_regime import build_regime_map
+from twscanner.research.backtest import _regime_at, summarize_by_regime
 
 
 def test_build_regime_map_synthetic(monkeypatch):

@@ -10,7 +10,6 @@ Walk-forward 回測
 import logging
 import math
 
-import numpy as np
 import pandas as pd
 
 from twscanner.analysis.indicators import add_indicators
@@ -135,7 +134,6 @@ def backtest_symbol(df, weights, min_score, hold_days=10, lookback=120, costs=No
                 bar = df.iloc[j]
                 low = float(bar["Low"])
                 high = float(bar["High"])
-                close = float(bar["Close"])
 
                 if low <= stop:
                     exit_idx = j
@@ -215,16 +213,20 @@ def split_trades_is_oos(all_trades, oos_ratio=0.3, mode="ratio", n_folds=3):
         for i, t in enumerate(ts):
             pos_in_fold = (i % fold) / fold if fold > 0 else 0
             if pos_in_fold >= (1 - oos_ratio):
-                t["split"] = "OOS"; oos_t.append(t)
+                t["split"] = "OOS"
+                oos_t.append(t)
             else:
-                t["split"] = "IS"; is_t.append(t)
+                t["split"] = "IS"
+                is_t.append(t)
     else:
         cut = int(round(n * (1 - oos_ratio)))
         for i, t in enumerate(ts):
             if i >= cut:
-                t["split"] = "OOS"; oos_t.append(t)
+                t["split"] = "OOS"
+                oos_t.append(t)
             else:
-                t["split"] = "IS"; is_t.append(t)
+                t["split"] = "IS"
+                is_t.append(t)
     return is_t, oos_t
 
 

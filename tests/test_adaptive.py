@@ -2,10 +2,12 @@
 import numpy as np
 import pandas as pd
 
-from twscanner.research.adaptive import (
-    pick_applicable, recommend_from_backtest, recommend_regime_thresholds,
-)
 from twscanner.analysis.indicators import add_indicators
+from twscanner.research.adaptive import (
+    pick_applicable,
+    recommend_from_backtest,
+    recommend_regime_thresholds,
+)
 
 
 def _df(n=180, seed=0):

@@ -13,7 +13,6 @@ def classify_entry(df, latest, high_20, vol20):
     high = float(latest["High"])
     low = float(latest["Low"])
     vol = float(latest["Volume"])
-    ma5 = float(latest["MA5"])
     ma10 = float(df["Close"].rolling(10).mean().iloc[-1])
     ma20 = float(latest["MA20"])
 

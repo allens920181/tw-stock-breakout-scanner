@@ -3,7 +3,6 @@ import pytest
 
 from twscanner.data.prices import fix_stock_code
 
-
 ETF_MAP = {
     "9805": "009805",
     "899": "00899",

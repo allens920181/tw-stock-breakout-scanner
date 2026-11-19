@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-「💰 資金流向」分頁的 Streamlit 視覺化。資料/計算都在 src/flows.py。
+「💰 資金流向」分頁的 Streamlit 視覺化。資料/計算都在 twscanner/market/flows.py。
 
 Streamlit 每次互動都會重跑所有分頁 → 重的抓取全部包在 st.cache_data，
 且第一次需使用者按鈕才開始載入（台股歷史首次約 1~2 分鐘）。

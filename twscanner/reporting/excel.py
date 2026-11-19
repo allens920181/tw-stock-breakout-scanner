@@ -1,3 +1,4 @@
+"""Excel 報告：掃描結果彙整成 DataFrame / 摘要，以及掃描與回測報告輸出。"""
 import os
 
 import pandas as pd

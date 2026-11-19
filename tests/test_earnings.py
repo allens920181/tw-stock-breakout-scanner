@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 from datetime import date, timedelta
 
-import numpy as np
-import pandas as pd
-
+from tests.test_scoring import CFG, _strong_uptrend_df
 from twscanner.data.earnings import days_to_earnings
 from twscanner.strategy.scoring import analyze_stock
-from tests.test_scoring import CFG, _strong_uptrend_df
 
 
 def test_days_to_earnings():

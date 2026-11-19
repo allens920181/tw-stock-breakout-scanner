@@ -9,7 +9,10 @@ from twscanner.data.prices import (
     resolve_markets_and_data,
 )
 from twscanner.research.backtest import (
-    backtest_symbol, summarize_by_regime, summarize_trades, summarize_trades_is_oos,
+    backtest_symbol,
+    summarize_by_regime,
+    summarize_trades,
+    summarize_trades_is_oos,
 )
 from twscanner.research.factor_eval import evaluate_factors, suggest_weights_from_lift
 from twscanner.research.sensitivity import detect_plateau, plateau_scan, sensitivity_scan
@@ -166,7 +169,9 @@ def run_weight_suggest(cfg, fe_result=None, resolved=None,
 def run_evaluate_journal(cfg, records=None, progress_cb=None):
     """前向訊號日誌（live OOS）：抓日誌標的後續 OHLC → 模擬出場 → 彙整實戰績效。"""
     from twscanner.portfolio.journal import (
-        evaluate_journal, load_journal, summarize_journal,
+        evaluate_journal,
+        load_journal,
+        summarize_journal,
     )
 
     def emit(stage, pct, msg):

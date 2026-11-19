@@ -1,6 +1,5 @@
 """歷史掃描紀錄：每次掃描完自動存一份摘要到 .cache/scans/"""
 import json
-import os
 from pathlib import Path
 
 import pandas as pd

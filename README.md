@@ -60,50 +60,47 @@ GUI 端在側欄選「掃描全台股」即可。
 
 報告輸出檔名格式：`台股全部分析報告_自動判斷市場_YYYYMMDD_HHMMSS.xlsx`
 
-## 測試
+## 開發
 
 ```bash
-uv run pytest
+uv sync                      # 安裝（含 pytest、ruff）
+uv run pytest                # 測試（含分層架構規則）
+uv run ruff check . --fix    # lint + import 排序
 ```
+
+CI 會在 push 到 `main` 及每個 PR 自動跑 lint 與測試。
 
 ## 專案結構
 
 ```
-.
-├── app.py               # Streamlit GUI
-├── main.py              # CLI 入口
-├── config.yaml          # 策略 / 資料 / 輸出參數
-├── src/
-│   ├── config.py        # 讀 yaml
-│   ├── cache.py         # 本地 Parquet 快取
-│   ├── fetcher.py       # yfinance 批次下載 + 平行抓股數
-│   ├── flows.py         # 資金流向計算（美股輪動 / 台股法人 / 台美連動）
-│   ├── flows_view.py    # 「💰 資金流向」分頁視覺化
-│   ├── indicators.py    # MA / KD / MACD
-│   ├── scoring.py       # 過濾 + 加權評分
-│   ├── report.py        # Excel 輸出
-│   └── runner.py        # 共用掃描流程（GUI/CLI）
-└── tests/
-    ├── test_fix_code.py
-    ├── test_indicators.py
-    └── test_scoring.py
+app.py          Streamlit 入口      main.py      CLI 入口      config.yaml   全部參數
+twscanner/
+├── core/       設定、快取、時區
+├── data/       外部資料來源（價格、法人、融資、營收、財報、產業）
+├── analysis/   純計算（指標、進場分類、部位、統計）
+├── strategy/   選股策略（突破評分、潛伏、族群）
+├── market/     大盤 / 美股 / 大資金 / 資金流向
+├── portfolio/  持股出場建議、訊號日誌
+├── research/   回測、因子驗證、敏感度、自適應
+├── storage/    雲端、歷史、偏好
+├── reporting/  Excel、K 線圖
+├── services/   掃描 / 查詢 / 持股 / 研究流程（GUI 與 CLI 共用）
+├── ui/         Streamlit：外殼、側欄、元件、pages/ 各分頁
+└── cli.py
+tests/          單元測試 + test_architecture.py（分層守門）
+docs/           架構、部署、雲端設定、判讀指南
 ```
 
-## 加權評分（總分 8）
+分層規則、各層職責、以及「新增資料源 / 策略 / 分頁」的步驟見 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
 
-| 條件 | 權重 | 說明 |
-| --- | --- | --- |
-| 突破+量增 | 2 | Close > 20 日高 **且** Volume > 20 日均量 × 1.2 |
-| MA 多頭 | 2 | MA5>MA20>MA60 **且** Close>MA20 |
-| 換手率強勢 | 2 | 換手率 > 1% **且** > 20 日平均換手率 |
-| KD 強勢 | 1 | K > D **且** K > 70 |
-| MACD 多方 | 1 | OSC > 0 |
+## 評分與過濾參數
 
-預設門檻：≥6 強勢候選、≥5 觀察、≥4 偏弱觀察。
+評分權重、進場/觀察門檻、品質過濾、風格 Preset、交易成本等**全部以 [`config.yaml`](config.yaml) 為準**，
+側欄可即時微調。各指標的意義與判讀方式見 [docs/判讀指南.md](docs/判讀指南.md)。
 
-## 品質前置過濾（預設值，於 `config.yaml` 調整）
+## 文件
 
-- `min_price: 10` — 股價過低直接排除
-- `min_avg_volume: 500000` — 20 日均量 < 500 張排除
-- `require_above_ma60: true` — 必須站上 MA60
-- `min_risk_pct: 0.02` — 停損距離 < 2% 視為訊號降級
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 工程架構與開發指南
+- [docs/DEPLOY.md](docs/DEPLOY.md) — 部署到 Streamlit Community Cloud
+- [docs/雲端設定.md](docs/雲端設定.md) — Neon 雲端會員空間（持股 / 日誌永久保存）
+- [docs/判讀指南.md](docs/判讀指南.md) — 系統說明與判讀指南

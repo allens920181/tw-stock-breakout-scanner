@@ -19,7 +19,6 @@ log = logging.getLogger(__name__)
 
 
 def _next_earnings_one(symbol):
-    key = f"earn_{symbol.replace('.', '_')}"
     try:
         t = yf.Ticker(symbol)
         cal = t.calendar

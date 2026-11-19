@@ -1,3 +1,4 @@
+"""強勢突破 / 早期突破策略：品質過濾 → 加權評分 → 進場類型 → 停損目標 → 部位，輸出單檔結果 dict。"""
 import pandas as pd
 
 from twscanner.analysis.entry import classify_entry

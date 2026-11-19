@@ -5,12 +5,11 @@ holdings.xlsx 欄位：
   股票代號 | 公司名稱(可空) | 進場價 | 進場日(YYYY-MM-DD) | 持有股數(可空)
 """
 import logging
-from datetime import datetime
 
 import pandas as pd
 
-from twscanner.data.prices import fix_stock_code
 from twscanner.analysis.indicators import add_indicators
+from twscanner.data.prices import fix_stock_code
 
 log = logging.getLogger(__name__)
 

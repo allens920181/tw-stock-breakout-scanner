@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Test（含分層規則 tests/test_architecture.py）
+        run: uv run pytest -q
+      - name: requirements.txt 與 uv.lock 同步
+        run: |
+          uv export --no-dev --no-hashes --format requirements-txt -o /tmp/req.txt
+          diff <(grep -v '^#' requirements.txt | sed '/^\s*$/d') <(grep -v '^#' /tmp/req.txt | sed '/^\s*$/d') \
+            || (echo "requirements.txt 過期：請執行 uv export --no-dev --no-hashes --format requirements-txt -o requirements.txt" && exit 1)

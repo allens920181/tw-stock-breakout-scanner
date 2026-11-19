@@ -1,3 +1,4 @@
+"""價格與股數資料：股票清單讀取、上市/上櫃判斷、yfinance 批次下載、平行抓股數與現價。"""
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed

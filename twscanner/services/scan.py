@@ -2,24 +2,23 @@
 import logging
 import time
 
-
 from twscanner.core import cache as cache_mod
+from twscanner.data.chips import fetch_chips
+from twscanner.data.earnings import fetch_all_earnings
+from twscanner.data.margin import fetch_margin
 from twscanner.data.prices import (
     fetch_all_current_prices,
     fetch_all_shares,
     load_stock_list,
     resolve_markets_and_data,
 )
-from twscanner.strategy.ambush import analyze_ambush
-from twscanner.data.chips import fetch_chips
-from twscanner.data.earnings import fetch_all_earnings
-from twscanner.data.margin import fetch_margin
 from twscanner.data.revenue import fetch_revenue
 from twscanner.data.sectors import fetch_sectors, fetch_shares_official
-from twscanner.strategy.groups import annotate_group_strength, apply_sector_heat
-from twscanner.market.us_regime import classify_us_market, merge_position_factor
 from twscanner.market.tw_regime import classify_market
+from twscanner.market.us_regime import classify_us_market, merge_position_factor
 from twscanner.reporting.excel import build_dataframes
+from twscanner.strategy.ambush import analyze_ambush
+from twscanner.strategy.groups import annotate_group_strength, apply_sector_heat
 from twscanner.strategy.scoring import analyze_stock
 
 log = logging.getLogger(__name__)
@@ -177,8 +176,9 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
                 emit("大盤判斷", 0.81, "抓大資金（外資台指期/台幣/大盤融資）")
                 try:
                     from datetime import timedelta
-                    from twscanner.market.bigmoney import classify_bigmoney
+
                     from twscanner.core.tz import today_tw
+                    from twscanner.market.bigmoney import classify_bigmoney
                     today = today_tw()
                     mdates = [(today - timedelta(days=k)).strftime("%Y%m%d")
                               for k in range(0, 9)]
