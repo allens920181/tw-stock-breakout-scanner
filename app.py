@@ -21,6 +21,7 @@ from src.chart import make_kline
 from src.config import load_config
 from src.fetcher import fix_stock_code
 from src.glossary import HELP
+from src.flows_view import render_flows_tab
 from src.history import cleanup_old, list_scans, load_scan_df, save_scan
 from src.macro import classify_us_market
 from src.market import classify_market
@@ -1325,8 +1326,8 @@ render_header(market_state, last_scan_at, us_state=us_state)
 # =====================================================
 # Tabs
 # =====================================================
-tab1, tab6, tab2, tab3, tab4, tab5 = st.tabs(
-    ["📈 買入掃描", "🔎 個股查詢", "💼 持股管理", "🧪 回測", "🕘 歷史", "📖 操作教學"])
+tab1, tab6, tab7, tab2, tab3, tab4, tab5 = st.tabs(
+    ["📈 買入掃描", "🔎 個股查詢", "💰 資金流向", "💼 持股管理", "🧪 回測", "🕘 歷史", "📖 操作教學"])
 
 
 # =====================================================
@@ -3434,3 +3435,10 @@ with tab6:
                 st.caption("加碼鐵律：過度延伸別追高；加碼量 ≤ 原倉、加後上移整體停損、總風險守單筆上限。")
 
             st.caption("⚠ 決策輔助、非投資建議；籌碼/營收為當日 best-effort 資料。")
+
+
+# =====================================================
+# Tab 7: 資金流向（美股輪動 / 台股法人 / 台美連動）
+# =====================================================
+with tab7:
+    render_flows_tab(base_cfg["data"]["cache_dir"])
