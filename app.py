@@ -29,7 +29,7 @@ from twscanner.data.names import lookup_names
 from twscanner.storage.preferences import load_prefs, save_prefs
 from twscanner.storage import cloud as store
 from twscanner.reporting.excel import write_excel
-from twscanner.services.runner import (
+from twscanner.services import (
     run_adaptive_recommend, run_backtest, run_evaluate_journal, run_factor_eval,
     run_holdings_scan, run_plateau, run_scan, run_sensitivity, run_single_lookup,
     run_stress_test,
@@ -3023,7 +3023,7 @@ with tab3:
                 st.caption(fe.get("note", ""))
 
                 # 套用 lift 建議權重（減法用）
-                from twscanner.services.runner import run_weight_suggest
+                from twscanner.services import run_weight_suggest
                 cfg = build_cfg()
                 try:
                     sug = run_weight_suggest(cfg, fe_result=fe)

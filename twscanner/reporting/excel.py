@@ -52,3 +52,16 @@ def write_excel(df, summary, failed_df, output_dir, prefix):
         if failed_df is not None and len(failed_df) > 0:
             failed_df.to_excel(writer, sheet_name="錯誤清單", index=False)
     return path
+
+
+def write_backtest_excel(bt, output_dir):
+    """回測結果（summary / trades / by_symbol）→ 回測報告_YYYYMMDD_HHMMSS.xlsx，回傳路徑。"""
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"回測報告_{now_tw().strftime('%Y%m%d_%H%M%S')}.xlsx")
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame([bt["summary"]]).to_excel(writer, sheet_name="摘要", index=False)
+        if len(bt["trades"]):
+            bt["trades"].to_excel(writer, sheet_name="交易明細", index=False)
+        if len(bt["by_symbol"]):
+            bt["by_symbol"].to_excel(writer, sheet_name="個股統計", index=False)
+    return path
