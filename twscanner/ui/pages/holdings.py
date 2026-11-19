@@ -5,7 +5,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
-from twscanner.core.tz import now_tw, today_tw
+from twscanner.core.tz import now_tw
 from twscanner.data.names import lookup_names
 from twscanner.data.prices import fix_stock_code
 from twscanner.services import run_holdings_scan
@@ -21,10 +21,8 @@ def render():
     base_cfg = get_base_config()
     # ============ 初始化 ============
     if "holdings_df" not in st.session_state:
-        st.session_state["holdings_df"] = pd.DataFrame([
-            {"股票代號": "2330", "公司名稱": "台積電", "成本價": 0.00,
-             "持有股數": 1000},
-        ])
+        st.session_state["holdings_df"] = pd.DataFrame(
+            columns=["股票代號", "公司名稱", "成本價", "持有股數"]).astype({"股票代號": str})
 
     # 正規化欄位：清掉任何來源殘留的舊欄位（進場日/進場價/持有張數），只留 4 個正規欄
     def _normalize_holdings(_df):
@@ -37,10 +35,15 @@ def render():
         for c in keep:
             if c not in _df.columns:
                 _df[c] = None
+        # 代號一律文字（雲端/Excel 來源可能是整數，會讓編輯表格崩潰）
+        _df["股票代號"] = _df["股票代號"].map(
+            lambda x: None if pd.isna(x) else str(x).strip().removesuffix(".0"))
         return _df[keep]
 
     _norm = _normalize_holdings(st.session_state["holdings_df"])
-    if list(_norm.columns) != list(st.session_state["holdings_df"].columns):
+    _cur = st.session_state["holdings_df"]
+    if (list(_norm.columns) != list(_cur.columns)
+            or not _norm["股票代號"].equals(_cur.get("股票代號"))):
         st.session_state["holdings_df"] = _norm   # 有殘留欄才覆寫，避免打斷編輯
         st.session_state["holdings_editor_version"] = (
             st.session_state.get("holdings_editor_version", 0) + 1)
@@ -143,7 +146,8 @@ def render():
             )
             if uploaded_h:
                 try:
-                    up_df = pd.read_excel(uploaded_h)
+                    # 代號一律當文字讀：Excel 的 2330 預設是數字，會讓編輯表格拒絕顯示而整頁崩潰
+                    up_df = pd.read_excel(uploaded_h, dtype={"股票代號": str})
                     # 舊版欄名相容
                     if "進場價" in up_df.columns and "成本價" not in up_df.columns:
                         up_df = up_df.rename(columns={"進場價": "成本價"})
@@ -286,7 +290,6 @@ def render():
         valid = valid[valid["股票代號"].astype(str).str.strip() != ""]
         cfg = build_cfg()
         holdings_list = []
-        today = today_tw()
         for _, row in valid.iterrows():
             code = fix_stock_code(row["股票代號"], cfg["etf_fix_map"])
             if code is None:
@@ -296,7 +299,7 @@ def render():
                 "code": code,
                 "company_name": str(row.get("公司名稱", "")).strip(),
                 "entry_price": float(row["成本價"]) if pd.notna(row.get("成本價")) else 0,
-                "entry_date": today,  # 無進場日欄位，預設今天（時間停損從今天起算）
+                "entry_date": None,  # 無進場日欄位 → analyze_holding 統一推估（與個股查詢一致）
                 "shares": shares_val,
             })
 

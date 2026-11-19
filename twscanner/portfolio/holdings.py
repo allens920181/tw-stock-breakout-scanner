@@ -1,8 +1,8 @@
 """
 持股管理：對持有部位產生賣出建議
 
-holdings.xlsx 欄位：
-  股票代號 | 公司名稱(可空) | 進場價 | 進場日(YYYY-MM-DD) | 持有股數(可空)
+持股欄位：股票代號 | 公司名稱 | 成本價 | 持有股數。
+沒有進場日時以 infer_entry_date 推估，並在結果的「進場日來源」寫明假設。
 """
 import logging
 
@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 
 def load_holdings(file_path, etf_fix_map):
-    df = pd.read_excel(file_path)
+    df = pd.read_excel(file_path, dtype={"股票代號": str})
     items = []
     for _, row in df.iterrows():
         code = fix_stock_code(row["股票代號"], etf_fix_map)
@@ -70,6 +70,24 @@ def _holding_alerts(chips, revenue, market_state):
     return alerts
 
 
+def infer_entry_date(df, entry_price, lookback=120, fallback_bars=20):
+    """
+    沒填進場日時的統一推估（個股查詢 / 持股管理 / 今日決策都用這個，答案才會一致）：
+    最近一次「當日高低區間包含成本價」的交易日 = 最可能的買進日。
+    近 lookback 根都沒碰過成本價 → 以 fallback_bars 根前（約一個月）起算。
+    回傳 (date, 說明文字)。
+    """
+    if df is None or df.empty or not entry_price:
+        return None, "未填"
+    recent = df.tail(lookback)
+    hit = recent[(recent["Low"] <= entry_price) & (recent["High"] >= entry_price)]
+    if len(hit):
+        d = hit.index[-1]
+        return d.date(), f"未填，推估為 {d:%Y-%m-%d}（最近一次成交價觸及成本價）"
+    d = df.index[max(0, len(df) - fallback_bars)]
+    return d.date(), f"未填，近 {lookback} 日未觸及成本價，以 {d:%Y-%m-%d}（約一個月前）起算"
+
+
 def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=None,
                     time_stop_days=10, profit_taking_at_1r=True,
                     atr_trail_mult=3.0, chips=None, revenue=None, market_state=None,
@@ -87,6 +105,10 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
     if df is None or df.empty or len(df) < 60:
         return _row(symbol, name, market, entry_price, entry_date, shares,
                     None, None, None, None, "資料不足", "保留", "")
+
+    entry_note = "使用者填寫"
+    if entry_date is None:
+        entry_date, entry_note = infer_entry_date(df, entry_price)
 
     df = add_indicators(df).dropna()
     if len(df) < 5:
@@ -263,6 +285,7 @@ def analyze_holding(symbol, name, market, df, entry_price, entry_date, shares=No
                close, profit_pct, r_multiple, held_days, "成功", label, note, qty,
                exit_plan=exit_plan)
     row["主動警示"] = alert_str
+    row["進場日來源"] = entry_note
     return row
 
 

@@ -32,9 +32,9 @@ def _to_float(x):
 
 
 def fetch_revenue(cache_dir, verify=True, use_cache=True):
-    """回傳 { code(無後綴): {yoy_pct, mom_pct, accum_yoy_pct, month} }。"""
+    """回傳 { code(無後綴): {yoy_pct, mom_pct, accum_yoy_pct, month, revenue_k, revenue_ly_k, accum_k, note} }。"""
     if use_cache:
-        cached = cache_mod.load_obj(cache_dir, "revenue_all")
+        cached = cache_mod.load_obj(cache_dir, "revenue_all_v2")
         if cached is not None:
             return cached
 
@@ -59,13 +59,18 @@ def fetch_revenue(cache_dir, verify=True, use_cache=True):
             out[code] = {
                 "yoy_pct": yoy, "mom_pct": mom,
                 "accum_yoy_pct": accum_yoy, "month": month,
+                # 金額單位：仟元；備註 = 公司自己對營收變化的說明（個股健檢會顯示）
+                "revenue_k": _to_float(row.get("營業收入-當月營收")),
+                "revenue_ly_k": _to_float(row.get("營業收入-去年當月營收")),
+                "accum_k": _to_float(row.get("累計營業收入-當月累計營收")),
+                "note": (str(row.get("備註", "")).strip() or None),
             }
         except Exception:
             continue
 
     log.info("月營收 %d 檔", len(out))
     if out:
-        cache_mod.save_obj(cache_dir, "revenue_all", out)
+        cache_mod.save_obj(cache_dir, "revenue_all_v2", out)
     return out
 
 

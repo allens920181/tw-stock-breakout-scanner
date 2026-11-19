@@ -30,7 +30,7 @@ def fix_stock_code(code, etf_fix_map):
 
 
 def load_stock_list(file_path, etf_fix_map):
-    df = pd.read_excel(file_path)
+    df = pd.read_excel(file_path, dtype={"股票代號": str})
     items = []
     for _, row in df.iterrows():
         code = fix_stock_code(row["股票代號"], etf_fix_map)
