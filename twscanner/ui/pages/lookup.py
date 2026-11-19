@@ -3,6 +3,7 @@ import html
 
 import streamlit as st
 
+from twscanner.analysis.indicators import high_1y_pct, high_1y_zone
 from twscanner.reporting.kline import make_kline
 from twscanner.services import run_single_lookup
 from twscanner.services.today import trade_plan
@@ -146,6 +147,9 @@ def render():
     else:
         chg = None
     rev = res.get("revenue") or {}
+    h1y = sc.get("距一年高點%")
+    if h1y is None:                     # 沒通過品質過濾時評分不會算，直接用價格資料算
+        h1y = high_1y_pct(df)
     price = sc.get("目前現價") or sc.get("收盤價")
     if (price is None or price != price) and df is not None and len(df):
         price = float(df["Close"].dropna().iloc[-1])
@@ -154,7 +158,7 @@ def render():
          signed_value(chg, fmt_pct(chg)) if chg is not None else None),
         ("等級 / 分數", f"{sc.get('綜合評級') or '未評級'}",
          f"{sc.get('評分顯示', sc.get('評分', '—'))} 分" if sc.get("綜合評級") else (sc.get("狀態") or None)),
-        ("比大盤強多少（60 日）", signed_value(sc.get("相對強度RS%"), fmt_pct(sc.get("相對強度RS%"))), None),
+        ("距一年高點（核心指標）", f"{h1y:.0f}%" if h1y is not None else "—", high_1y_zone(h1y)),
         ("營收年增", signed_value(rev.get("yoy_pct"), fmt_pct(rev.get("yoy_pct"), 1))
          if rev.get("yoy_pct") is not None else "—", None),
     ])

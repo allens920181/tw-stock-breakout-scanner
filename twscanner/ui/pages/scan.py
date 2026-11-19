@@ -8,7 +8,7 @@ import streamlit as st
 from twscanner.core.tz import today_tw
 from twscanner.reporting.excel import write_excel
 from twscanner.services import run_adaptive_recommend
-from twscanner.services.today import CONDITION_KEYS, trade_plan
+from twscanner.services.today import CONDITION_KEYS, sort_by_core, trade_plan
 from twscanner.ui.actions import execute_scan, rescan_with_cache, sync_strategy_mode
 from twscanner.ui.components.blocks import asof, buy_form, conclusion, empty, kpi_row, plan_card
 from twscanner.ui.format import clean_stock_col, colors
@@ -17,7 +17,7 @@ from twscanner.ui.state import get_base_config, persist_calibration_date
 
 SIGNAL_RANK = {"進場": 0, "觀察": 1, "不操作": 2, "未通過過濾": 3}
 GROUPS = {
-    "進場計畫": ["股票", "綜合評級", "訊號判斷", "評分", "說明", "進場參考價", "停損價",
+    "進場計畫": ["股票", "綜合評級", "訊號判斷", "距一年高點%", "評分", "說明", "進場參考價", "停損價",
                "目標價1(+1R半倉)", "目標價2(+2R出清)", "建議張數"],
     "風險與部位": ["股票", "訊號判斷", "風險%", "RR比", "建議張數", "進場成本", "佔資金%",
                 "現價偏離%", "乖離MA20%", "部位提示"],
@@ -28,7 +28,7 @@ GROUPS = {
 }
 NUM_FMT = {
     "進場參考價": "%.2f", "停損價": "%.2f", "目標價1(+1R半倉)": "%.2f", "目標價2(+2R出清)": "%.2f",
-    "收盤價": "%.2f", "MA20": "%.2f", "MA60": "%.2f", "K": "%.1f", "D": "%.1f", "ADX": "%.1f",
+    "距一年高點%": "%.0f%%", "收盤價": "%.2f", "MA20": "%.2f", "MA60": "%.2f", "K": "%.1f", "D": "%.1f", "ADX": "%.1f",
     "風險%": "%.2f%%", "佔資金%": "%.2f%%", "現價偏離%": "%+.2f%%", "乖離MA20%": "%+.2f%%",
     "換手率%": "%.2f%%", "相對強度RS%": "%+.2f%%", "月營收YoY%": "%+.1f%%", "RR比": "%.2f",
     "建議張數": "%d 張", "進場成本": "localized", "法人買賣超(張)": "localized",
@@ -49,7 +49,7 @@ def _headline(df, market_state):
         return (f"今天沒有達到進場標準的股票（{n_watch} 檔觀察）",
                 "沒有好機會時不做，也是一種操作。", "wait")
     return (f"{n_go} 檔達到進場標準，{n_watch} 檔觀察",
-            "點表格中的一列，看入選理由與完整交易計畫。挑 1–2 檔就好。", "go")
+            "已依核心指標「距一年高點」排序（≥ 90% 為強勢區）。點一列看完整交易計畫，挑 1–2 檔就好。", "go")
 
 
 def _style(view):
@@ -68,7 +68,14 @@ def _style(view):
         except (TypeError, ValueError):
             return ""
         return f"color:{c['up'] if f > 0 else c['down']}" if f else ""
+    def strong(v):
+        try:
+            return "font-weight:700" if float(v) >= 90 else "color:#94A3B8" if float(v) < 70 else ""
+        except (TypeError, ValueError):
+            return ""
     sty = view.style
+    if "距一年高點%" in view:
+        sty = sty.map(strong, subset=["距一年高點%"])
     if "訊號判斷" in view:
         sty = sty.map(sig, subset=["訊號判斷"])
     cols = [x for x in SIGNED if x in view.columns]
@@ -85,8 +92,7 @@ def _table(df):
 
     d = df.copy()
     d["_rank"] = d["訊號判斷"].map(SIGNAL_RANK).fillna(3) if "訊號判斷" in d else 0
-    by = ["_rank", "評分"] if "評分" in d else ["_rank"]
-    d = d.sort_values(by, ascending=[True, False][:len(by)])
+    d = sort_by_core(d)          # 與今日決策同一排序：訊號 → 距一年高點 → 評分
     if sig in ("進場", "觀察"):
         d = d[d["訊號判斷"] == sig]
     if kw:

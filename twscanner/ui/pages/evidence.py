@@ -7,20 +7,116 @@ import streamlit as st
 
 from twscanner.analysis.goal import capital_for_target
 from twscanner.core.config import PROJECT_ROOT
-from twscanner.ui.components.blocks import conclusion
+from twscanner.ui.components.blocks import conclusion, kpi_row
 from twscanner.ui.components.charts import plot
+from twscanner.ui.format import fmt_pct
 
 STUDY = PROJECT_ROOT / "docs" / "research" / "strategy_study_2026-11.json"
+SHORT = {"中期動能（6 個月漲幅）": "6 個月漲幅", "短期動能（1 個月漲幅）": "1 個月漲幅",
+         "短期反轉（1 個月跌深）": "1 個月跌深", "系統突破分數": "突破分數"}
+CORE = PROJECT_ROOT / "docs" / "research" / "core_indicator_2026-11.json"
 SERIES = [("breakout", "突破訊號（系統預設）", "#2563EB"),
           ("rs", "相對強度前 10%", "#B45309"),
           ("random", "隨機進場（對照組）", "#94A3B8")]
 
 
-def _load():
+def _load(path=STUDY):
     try:
-        return json.loads(STUDY.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _bar_layout(fig, height):
+    fig.update_layout(height=height, margin=dict(l=8, r=8, t=12, b=8), plot_bgcolor="#FFFFFF",
+                      paper_bgcolor="#FFFFFF", showlegend=False,
+                      font=dict(family="Inter, Noto Sans TC, sans-serif", size=12))
+
+
+def _core_section():
+    """核心指標：8 個候選指標的比較，以及「距一年高點」的門檻與逐年結果。"""
+    core = _load(CORE)
+    if not core:
+        return False
+    th = core["threshold"]
+    nb, bear = th["non_bear"], th["bear"]
+    conclusion("最值得用的一個指標：距一年高點（收盤 ÷ 一年最高價）",
+               f"大盤不是空頭時，收盤 ≥ 一年高點 90% 的股票，之後 1 個月平均 {nb['t90']:+.2f}%（已扣成本），"
+               f"全部可交易股 {nb['all']:+.2f}%，離高點 30% 以上的 {nb['low']:+.2f}%；"
+               f"{nb['beat_avg_pct']:.0f}% 的週數跑贏平均，每一年都跑贏（壞年份仍會賠，只是賠得少）。大盤空頭時沒有優勢。", "go")
+    kpi_row([
+        ("強勢區 1 個月", fmt_pct(nb["t90"]), "大盤非空頭、扣成本"),
+        ("全部可交易股", fmt_pct(nb["all"]), "同期平均"),
+        ("跑贏平均的週數", f"{nb['beat_avg_pct']:.0f}%", f"{nb['weeks']} 週"),
+        ("平均每週符合", f"{nb['avg_count']:.0f} 檔", "可交易股中"),
+    ])
+
+    st.markdown("**8 個指標比一比：前 20% 的股票，1 個月比平均多賺幾 %**")
+    rk = sorted(core["ranking"], key=lambda r: -r["all"]["excess_pct"])
+    names = [SHORT.get(r["name"], r["name"]) for r in rk]
+    vals = [r["all"]["excess_pct"] for r in rk]
+    fig = go.Figure(go.Bar(
+        x=vals, y=names, orientation="h",
+        marker_color=["#4F46E5" if r["name"] == "距一年高點" else "#CBD5E1" for r in rk],
+        text=[f"{v:+.2f}%" for v in vals], textposition="outside", cliponaxis=False,
+        hovertext=[f"{r['name']}<br>t 值 {r['all']['t']:.1f}<br>非空頭 {r['non_bear']['excess_pct']:+.2f}% · "
+                   f"空頭 {r['bear']['excess_pct']:+.2f}%" for r in rk], hoverinfo="text"))
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(title="比平均多賺 %", zeroline=True, zerolinecolor="#94A3B8",
+                     gridcolor="#F1F5F9", range=[min(vals) - 0.35, max(vals) + 0.4])
+    _bar_layout(fig, 300)
+    plot(fig)
+    top = next(r for r in rk if r["name"] == "距一年高點")["all"]
+    st.caption(f"距一年高點最高也最穩：{top['years_pos']}/{top['years']} 年為正、t 值 {top['t']:.1f}"
+               "（> 2 代表不太可能是運氣）。動能類指標（漲幅、站上季線）也有效但較不穩；"
+               "「跌深買反彈」與「低波動」在台股反而落後。")
+
+    st.markdown("**離一年高點越近，之後 1 個月越好（扣成本）**")
+    groups = [("離高點 30%+", "low"), ("全部", "all"), ("≥ 85%", "t85"), ("≥ 90%", "t90"), ("≥ 95%", "t95")]
+    fig = go.Figure()
+    for label, src, color in (("大盤非空頭", nb, "#4F46E5"), ("大盤空頭", bear, "#CBD5E1")):
+        ys = [src[k] for _, k in groups]
+        fig.add_trace(go.Bar(name=label, x=[g for g, _ in groups], y=ys, marker_color=color,
+                             text=[f"{v:+.1f}" for v in ys], textposition="outside", cliponaxis=False,
+                             textfont=dict(size=10)))
+    fig.update_layout(barmode="group")
+    fig.update_yaxes(title="1 個月平均 %", gridcolor="#F1F5F9", zeroline=True, zerolinecolor="#94A3B8")
+    _bar_layout(fig, 280)
+    fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.2, x=0))
+    plot(fig)
+    st.caption("大盤非空頭時，越接近一年高點、之後越好；大盤空頭時各組差不多，所以空頭時這個指標不用。")
+
+    st.markdown("**逐年檢查：強勢區 vs 全部（大盤非空頭時）**")
+    yr = core["yearly_non_bear"]
+    years = list(yr)
+    xs = [f"'{y[2:]}" for y in years]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name="強勢區 ≥ 90%", x=xs, y=[yr[y]["t90"] for y in years], marker_color="#4F46E5"))
+    fig.add_trace(go.Bar(name="全部可交易股", x=xs, y=[yr[y]["all"] for y in years], marker_color="#CBD5E1"))
+    fig.update_layout(barmode="group")
+    fig.update_xaxes(type="category", tickangle=0)
+    fig.update_yaxes(title="1 個月平均 %", gridcolor="#F1F5F9", zeroline=True, zerolinecolor="#94A3B8")
+    _bar_layout(fig, 260)
+    fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.2, x=0))
+    plot(fig)
+
+    st.markdown("### 怎麼用在每天的操作")
+    st.markdown(
+        "1. **先看大盤燈號**：空頭就不開新倉（這個指標在空頭沒有優勢）。\n"
+        "2. **候選股只看強勢區**（距一年高點 ≥ 90%）。找標的、今日決策都已依此排序，個股健檢會直接顯示。\n"
+        "3. **進場價、停損、張數照交易計畫卡**；指標只負責「挑哪幾檔」，不負責「何時賣」。\n"
+        "4. **分散 3–5 檔、每檔固定風險**：研究結果是一群股票的平均，單一檔仍可能賠錢。\n"
+        "5. **用自己的紀錄驗證**：做滿 30 筆後，看「實戰績效」的期望值是不是正的。")
+    with st.expander("研究方法、限制與重跑方式"):
+        st.markdown(
+            f"- 資料：{core['stocks']} 檔目前上市股，{core['period']}，共 {core['weeks']} 週；每週排名一次。\n"
+            "- 可交易：股價 ≥ 10 元、20 日均量 ≥ 500 張。**隔天收盤才買**，持有 20 個交易日，含息。\n"
+            f"- 成本：來回 {core['cost_pct']:.3f}%（手續費 ×2、證交稅、滑價 ×2）。\n"
+            "- 大盤空頭：加權指數收盤 < MA20 且 MA5 < MA20（系統既有定義，沒有為研究調整）。\n"
+            "- **限制**：只含目前仍上市的股票（下市股不在內，絕對報酬會偏高，比較強弱的影響較小）；"
+            "過去十年台股以多頭為主；每週平均約 130 檔符合，一般人只會買其中幾檔，結果會比平均更分散。\n"
+            "- 程式：`scripts/strategy_study/core_indicator.py`（資料用 `download10y.py` 抓）。建議每季重跑。")
+    return True
 
 
 def _chart(data, period, title):
@@ -92,10 +188,18 @@ def render():
     if not data:
         st.caption("找不到研究資料。")
         return
-    conclusion("過去兩年，系統的選股訊號沒有比隨機挑股更好",
-               f"{data['universe']}、{data['period']}。樣本內（{data['split']['is']}）多數策略賺錢，"
-               f"但隨機進場也一樣賺；樣本外（{data['split']['oos']}）全部轉為持平或虧損。"
-               f"{data['grid']['variants']} 種參數組合中，沒有一種在樣本外有顯著優勢。", "stop")
+    has_core = _core_section()
+    head = "過去兩年，「突破訊號 + 停損停利」沒有比隨機進場更好"
+    body = (f"{data['universe']}、{data['period']}。樣本內（{data['split']['is']}）多數策略賺錢，"
+            f"但同樣站上季線、隨機進場也一樣賺；樣本外（{data['split']['oos']}）全部轉為持平或虧損。"
+            f"{data['grid']['variants']} 種參數組合中，沒有一種在樣本外有顯著優勢。"
+            "也就是說：賺錢來自「股票本身夠強」，突破那一天才買沒有額外好處。")
+    if has_core:
+        st.markdown("---")
+        st.markdown(f"### 附：{head}")
+        st.markdown(body)
+    else:
+        conclusion(head, body, "stop")
     oos_share = data["regime_share"]["OOS"]
     is_share = data["regime_share"]["IS"]
     _chart(data, "OOS", "樣本外（最近 6 個月）：三種方法都在 0 附近或以下")
@@ -105,14 +209,14 @@ def render():
 
     st.markdown("### 這對你的意思")
     st.markdown(
-        "1. **賺錢的來源是「多頭時持有強勢股」，不是選中哪一檔。** 前 15 個月，只要在大盤非空頭時買站上 MA60 的股票，"
-        "隨機挑也有正報酬；行情轉弱後，沒有一種挑法有顯著獲利。所以最重要的開關是頁首的大盤燈號。\n"
+        "1. **賺錢的來源是「多頭時持有強勢股」，不是突破那一天的訊號。** 前 15 個月，只要在大盤非空頭時買站上 MA60 的股票，"
+        "隨機挑也有正報酬；行情轉弱後，沒有一種挑法有顯著獲利。所以先看大盤燈號，再用「距一年高點」挑最強的。\n"
         "2. **系統最有價值的部分是風險控制。** 每筆固定風險、照停損出場、空頭不開新倉、月虧損上限，"
         "決定的是你在壞行情裡少賠多少，這比選股更能保護「每月一萬」的目標。\n"
         "3. **月目標要先用小部位驗證。** 先用最小單位（例如 1 張或零股）照計畫操作，累積 30 筆以上實戰紀錄，"
         "看「策略驗證 → 實戰績效」的期望值是否為正，再放大到正常部位。\n"
-        "4. **評分當作「篩選清單」，不要當成「預測」。** 系統的條件能把明顯不該碰的股票（下跌趨勢、流動性差、"
-        "財報地雷）排除掉，但在合格清單裡，排名第一和第十的表現沒有可靠差別。")
+        "4. **評分當作「篩選清單」，排序交給核心指標。** 評分的條件能把明顯不該碰的股票（下跌趨勢、流動性差、"
+        "財報地雷）排除掉，但用評分排第一和第十沒有可靠差別；所以系統改用「距一年高點」排序。")
     _index_section(data, float(st.session_state.get("month_target", 10_000)))
     with st.expander("研究方法與重跑方式"):
         st.markdown(

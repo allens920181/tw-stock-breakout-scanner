@@ -7,6 +7,7 @@
 import pandas as pd
 
 from twscanner.analysis.goal import month_progress, plan, stats_from_r
+from twscanner.analysis.indicators import high_1y_zone
 from twscanner.portfolio.risk import portfolio_risk
 from twscanner.portfolio.trade_log import month_stats
 
@@ -41,7 +42,11 @@ def trade_plan(row, max_hold_days=20):
     t1, t2 = _f(row.get("目標價1(+1R半倉)")), _f(row.get("目標價2(+2R出清)"))
     lots = int(_f(row.get("建議張數")) or 0)
     risk_ps = entry - stop if entry and stop and entry > stop else None
-    reasons = [label for key, label in CONDITION_KEYS if _true(row.get(key))]
+    h1y = _f(row.get("距一年高點%"))
+    reasons = []
+    if h1y is not None:
+        reasons.append(f"距一年高點 {h1y:.0f}%（{high_1y_zone(h1y)}）")
+    reasons += [label for key, label in CONDITION_KEYS if _true(row.get(key))]
     for key in ("籌碼確認", "營收動能"):
         v = row.get(key)
         if isinstance(v, str) and v not in ("", "—"):
@@ -56,20 +61,32 @@ def trade_plan(row, max_hold_days=20):
         "cost": _f(row.get("進場成本")),
         "entry_type": row.get("進場類型"), "entry_note": row.get("進場條件"),
         "reasons": reasons, "why": row.get("評級理由"),
+        "high_1y": h1y, "high_1y_zone": high_1y_zone(h1y),
         "max_hold_days": max_hold_days,
         "invalidation": f"收盤跌破 {stop:,.2f} 就出場，不攤平" if stop else "依停損規則出場",
     }
 
 
+def sort_by_core(d):
+    """全站同一排序：訊號 → 距一年高點（高的在前）→ 評分。"""
+    d = d.copy()
+    if "_rank" not in d:
+        d["_rank"] = d["訊號判斷"].map({"進場": 0, "觀察": 1}).fillna(2) if "訊號判斷" in d else 0
+    d["_h1y"] = pd.to_numeric(d["距一年高點%"], errors="coerce") if "距一年高點%" in d else float("nan")
+    d["_score"] = pd.to_numeric(d["評分"], errors="coerce") if "評分" in d else 0
+    d = d.sort_values(["_rank", "_h1y", "_score"], ascending=[True, False, False], na_position="last")
+    return d.drop(columns=["_h1y", "_score"])
+
+
 def candidates(scan_df, n=5):
-    """依訊號（進場 > 觀察）與分數排序，取前 n 檔做成交易計畫。"""
+    """依訊號（進場 > 觀察）→ 核心指標「距一年高點」→ 分數排序，取前 n 檔做成交易計畫。"""
     if scan_df is None or len(scan_df) == 0 or "訊號判斷" not in scan_df:
         return []
     d = scan_df[scan_df["訊號判斷"].isin(["進場", "觀察"])].copy()
     if d.empty:
         return []
     d["_rank"] = d["訊號判斷"].map({"進場": 0, "觀察": 1})
-    d = d.sort_values(["_rank", "評分"], ascending=[True, False])
+    d = sort_by_core(d)
     return [trade_plan(r) for _, r in d.head(n).iterrows()]
 
 

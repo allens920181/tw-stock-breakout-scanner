@@ -194,3 +194,35 @@ def test_capital_for_target():
     assert capital_for_target(10_000, 0.08) == 1_500_000
     assert capital_for_target(10_000, 0) is None
     assert plan(1_000_000, 0.01, 10_000)["required_annual_pct"] == 12
+
+
+def test_high_1y_pct_and_zone():
+    import pandas as pd
+
+    from twscanner.analysis.indicators import high_1y_pct, high_1y_zone
+    n = 260
+    close = pd.Series([100.0] * (n - 1) + [95.0])
+    high = pd.Series([100.0] * n)
+    high.iloc[5] = 200.0                      # 一年以前的高點不算（window 250）
+    df = pd.DataFrame({"Close": close, "High": high})
+    assert high_1y_pct(df) == 95.0
+    assert high_1y_pct(df.iloc[:100]) is None                 # 資料不足
+    assert high_1y_zone(95) == "強勢區"
+    assert high_1y_zone(80) == "中間"
+    assert high_1y_zone(60) == "弱勢區"
+    assert high_1y_zone(None) == "資料不足"
+
+
+def test_candidates_sorted_by_core_indicator():
+    import pandas as pd
+
+    from twscanner.services.today import candidates
+    df = pd.DataFrame([
+        {"股票": "1111.TW", "訊號判斷": "進場", "評分": 9, "距一年高點%": 75.0, "進場參考價": 10, "停損價": 9},
+        {"股票": "2222.TW", "訊號判斷": "進場", "評分": 6, "距一年高點%": 98.0, "進場參考價": 10, "停損價": 9},
+        {"股票": "3333.TW", "訊號判斷": "觀察", "評分": 9, "距一年高點%": 99.0, "進場參考價": 10, "停損價": 9},
+        {"股票": "4444.TW", "訊號判斷": "進場", "評分": 8, "距一年高點%": None, "進場參考價": 10, "停損價": 9},
+    ])
+    plans = candidates(df)
+    assert [p["code"] for p in plans] == ["2222", "1111", "4444", "3333"]
+    assert plans[0]["reasons"][0] == "距一年高點 98%（強勢區）"

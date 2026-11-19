@@ -2,7 +2,7 @@
 import pandas as pd
 
 from twscanner.analysis.entry import classify_entry
-from twscanner.analysis.indicators import add_indicators
+from twscanner.analysis.indicators import add_indicators, high_1y_pct, high_1y_zone
 from twscanner.analysis.sizing import calc_position, calc_targets
 
 
@@ -55,6 +55,7 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
     if df.empty or len(df) < 80:
         return _empty_result(symbol, company_name, market, "資料不足")
 
+    h1y = high_1y_pct(df)                      # 核心指標：要用完整一年資料，在 dropna 之前算
     df = add_indicators(df).dropna()
     if len(df) < 30:
         return _empty_result(symbol, company_name, market, "指標資料不足")
@@ -401,6 +402,9 @@ def analyze_stock(symbol, company_name, market, df, shares, cfg,
         "評級理由": reason,
         "進場類型": entry_info["entry_label"],
         "進場條件": entry_info["entry_note"],
+
+        "距一年高點%": h1y,
+        "一年高點區": high_1y_zone(h1y),
 
         "收盤價": round(entry, 2),
         "目前現價": round(current_price, 2) if current_price is not None else None,
