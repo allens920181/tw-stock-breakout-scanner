@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from src.sectors import annotate_group_strength, _name
+from twscanner.data.sectors import annotate_group_strength, _name
 
 
 def test_industry_name_map():
@@ -27,7 +27,7 @@ def test_group_strength():
 
 
 def test_sector_heat_reduces_position():
-    from src.sectors import apply_sector_heat
+    from twscanner.data.sectors import apply_sector_heat
     # 半導體 4 檔進場（超過上限 3）→ 每檔降碼 ×0.75
     res = [
         {"股票": f"233{i}.TW", "訊號判斷": "進場", "產業": "半導體",
@@ -41,7 +41,7 @@ def test_sector_heat_reduces_position():
 
 
 def test_sector_heat_no_change_under_limit():
-    from src.sectors import apply_sector_heat
+    from twscanner.data.sectors import apply_sector_heat
     res = [
         {"股票": "2330.TW", "訊號判斷": "進場", "產業": "半導體",
          "建議張數": 5, "進場成本": 500000, "佔資金%": 50.0},

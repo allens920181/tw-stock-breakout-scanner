@@ -4,8 +4,8 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from src.earnings import days_to_earnings
-from src.scoring import analyze_stock
+from twscanner.data.earnings import days_to_earnings
+from twscanner.strategy.scoring import analyze_stock
 from tests.test_scoring import CFG, _strong_uptrend_df
 
 

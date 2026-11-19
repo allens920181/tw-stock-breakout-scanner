@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src import flows as F
+from twscanner.market import flows as F
 
 
 def _idx(n, start="2026-01-01"):

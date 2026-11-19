@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from src.revenue import classify_revenue
+from twscanner.data.revenue import classify_revenue
 
 CFG = {"yoy_strong": 10.0, "yoy_weak": -20.0}
 
@@ -30,7 +30,7 @@ def test_scoring_weak_revenue_downgrades_entry():
     """營收大幅衰退 + 進場訊號 → 應降為觀察。"""
     import numpy as np
     import pandas as pd
-    from src.scoring import analyze_stock
+    from twscanner.strategy.scoring import analyze_stock
 
     n = 160
     close = np.linspace(40, 80, n)

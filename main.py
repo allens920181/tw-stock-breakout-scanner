@@ -2,10 +2,10 @@ import argparse
 import logging
 import sys
 
-from src.config import load_config
-from src.report import write_excel
-from src.runner import run_backtest, run_scan
-from src.universe import fetch_twse_universe
+from twscanner.core.config import load_config
+from twscanner.reporting.excel import write_excel
+from twscanner.services.runner import run_backtest, run_scan
+from twscanner.data.universe import fetch_twse_universe
 
 
 def setup_logging(level, log_file=None):

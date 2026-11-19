@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from src.sizing import evaluate_add
-from src.holdings import analyze_holding
+from twscanner.analysis.sizing import evaluate_add
+from twscanner.portfolio.holdings import analyze_holding
 
 CFG = {
     "position_sizing": {"total_capital": 1_000_000, "risk_per_trade_pct": 0.01},

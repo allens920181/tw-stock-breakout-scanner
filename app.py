@@ -10,31 +10,31 @@ import logging
 import tempfile
 from datetime import datetime
 
-from src.tz import now_tw, today_tw
+from twscanner.core.tz import now_tw, today_tw
 from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.chart import make_kline
-from src.config import load_config
-from src.fetcher import fix_stock_code
-from src.glossary import HELP
-from src.flows_view import render_flows_tab
-from src.history import cleanup_old, list_scans, load_scan_df, save_scan
-from src.macro import classify_us_market
-from src.market import classify_market
-from src.name_lookup import lookup_names
-from src.preferences import load_prefs, save_prefs
-from src import store
-from src.report import write_excel
-from src.runner import (
+from twscanner.reporting.kline import make_kline
+from twscanner.core.config import load_config
+from twscanner.data.prices import fix_stock_code
+from twscanner.ui.glossary import HELP
+from twscanner.ui.pages.flows import render_flows_tab
+from twscanner.storage.history import cleanup_old, list_scans, load_scan_df, save_scan
+from twscanner.market.us_regime import classify_us_market
+from twscanner.market.tw_regime import classify_market
+from twscanner.data.names import lookup_names
+from twscanner.storage.preferences import load_prefs, save_prefs
+from twscanner.storage import cloud as store
+from twscanner.reporting.excel import write_excel
+from twscanner.services.runner import (
     run_adaptive_recommend, run_backtest, run_evaluate_journal, run_factor_eval,
     run_holdings_scan, run_plateau, run_scan, run_sensitivity, run_single_lookup,
     run_stress_test,
 )
-from src.universe import fetch_twse_universe
+from twscanner.data.universe import fetch_twse_universe
 
 
 # =====================================================
@@ -404,7 +404,7 @@ if _cloud_owner() and not st.session_state.get("_cloud_loaded"):
     except Exception:
         pass
     try:
-        from src import journal as _jrn
+        from twscanner.portfolio import journal as _jrn
         _cj = store.load_journal(_cloud_owner())
         if _cj is not None:
             _jrn.save_journal(_cj)          # 還原雲端日誌到本機工作檔
@@ -1822,7 +1822,7 @@ with tab1:
                 logging.getLogger("main").warning("存歷史失敗：%s", e)
             # 前向訊號日誌（live OOS）：記錄本次進場清單
             try:
-                from src.journal import log_signals, load_journal as _ld_jrn
+                from twscanner.portfolio.journal import log_signals, load_journal as _ld_jrn
                 _added = log_signals(
                     result["df"], today_tw().isoformat(),
                     mode=mode, signals=("進場",))
@@ -1921,7 +1921,7 @@ with tab1:
                 go_auto = oc2.button("🚀 一鍵校準並重掃",
                                      type="primary", use_container_width=True)
                 if go_auto:
-                    from src.adaptive import pick_applicable
+                    from twscanner.research.adaptive import pick_applicable
                     cfg = build_cfg()
                     bar_o = st.progress(0.0, text="自動校準中 …")
 
@@ -3023,7 +3023,7 @@ with tab3:
                 st.caption(fe.get("note", ""))
 
                 # 套用 lift 建議權重（減法用）
-                from src.runner import run_weight_suggest
+                from twscanner.services.runner import run_weight_suggest
                 cfg = build_cfg()
                 try:
                     sug = run_weight_suggest(cfg, fe_result=fe)
@@ -3081,7 +3081,7 @@ with tab4:
         "回測是歷史模擬；**這裡是真帳**——每次掃描的「進場」清單自動存檔，"
         "用後續真實價格量**實際 R**，檢查系統實戰準不準。樣本要時間累積，越跑越準。"
     )
-    from src.journal import load_journal, save_journal
+    from twscanner.portfolio.journal import load_journal, save_journal
     _jrecords = load_journal()
     jc1, jc2, jc3 = st.columns([1.4, 1, 1])
     jc1.caption(f"日誌累計 {len(_jrecords)} 筆進場訊號")
@@ -3407,7 +3407,7 @@ with tab6:
 
             # ---- ➕ 加碼檢查 ----
             with st.expander("➕ 加碼檢查（現價加碼是否合理）", expanded=False):
-                from src.sizing import evaluate_add
+                from twscanner.analysis.sizing import evaluate_add
                 cur_px = sc.get("目前現價") or sc.get("收盤價")
                 add_lots = st.number_input("想加幾張", min_value=1, max_value=100,
                                            value=1, step=1, key="add_lots")

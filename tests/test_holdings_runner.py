@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from src.holdings import analyze_holding
+from twscanner.portfolio.holdings import analyze_holding
 
 
 def _uptrend(n=300, lo=50, hi=140):

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-from src.bigmoney import (
+from twscanner.market.bigmoney import (
     combine_bigmoney, parse_foreign_fut_oi, score_foreign_fut,
     score_market_margin, score_twd,
 )
-from src.macro import merge_position_factor
+from twscanner.market.us_regime import merge_position_factor
 
 _CSV = """日期,商品名稱,身份別,a,b,c,d,e,f,g,h,i,j,淨額,k
 2024/05/13,臺股期貨,外資及陸資,9,1,9,1,-5,1,2,1,4,1,-14517,1

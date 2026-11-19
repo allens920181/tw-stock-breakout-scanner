@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from src.sizing import calc_position
+from twscanner.analysis.sizing import calc_position
 
 
 def test_adv_cap_limits_position():

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 
-from src.stats import bootstrap_diff_ci, bootstrap_mean_ci, sample_reliability
+from twscanner.analysis.stats import bootstrap_diff_ci, bootstrap_mean_ci, sample_reliability
 
 
 def test_bootstrap_mean_ci_basic():

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-from src import store
+from twscanner.storage import cloud as store
 
 
 def test_disabled_by_default():
