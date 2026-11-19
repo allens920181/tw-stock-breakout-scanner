@@ -8,7 +8,7 @@ from twscanner.storage.preferences import save_prefs
 from twscanner.ui.components.common import make_stock_list_template
 from twscanner.ui.glossary import HELP
 from twscanner.ui.settings import apply_preset
-from twscanner.ui.state import cloud_passcode, get_base_config
+from twscanner.ui.state import cloud_owner, cloud_passcode, get_base_config
 
 
 @dataclass
@@ -287,18 +287,21 @@ def render_sidebar():
                 format_func=lambda k: {"tw": "紅漲綠跌（台股）", "us": "綠漲紅跌（美股）"}[k],
                 help="全站的漲跌、損益、多空燈號都依此上色。",
             )
-            st.caption("儲存後下次啟動會自動套用")
+            st.caption("風格與漲跌顏色存在本機；總資金、月目標等財務數字只在登入雲端後保存"
+                       "（公開部署時伺服器檔案是所有訪客共用的）。")
             if st.button("儲存目前設定", use_container_width=True):
-                ok = save_prefs({
+                res = save_prefs({
                     "preset": st.session_state.get("preset", "balanced"),
                     "total_capital": int(st.session_state.get("total_capital", 1_000_000)),
                     "month_target": int(st.session_state.get("month_target", 10_000)),
                     "loss_limit_r": float(st.session_state.get("loss_limit_r", 2.0)),
                     "color_mode": st.session_state.get("color_mode", "tw"),
                     "onboarded": True,
-                })
-                if ok:
-                    st.success("已儲存")
+                }, cloud_owner())
+                if res["cloud"]:
+                    st.success("已儲存（含財務數字，存在你的雲端空間）")
+                elif res["local"]:
+                    st.success("已儲存風格與漲跌顏色；財務數字需登入雲端才會保存")
                 else:
                     st.error("儲存失敗")
 

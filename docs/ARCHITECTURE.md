@@ -133,7 +133,8 @@ uv export --no-dev --no-hashes --format requirements-txt -o requirements.txt
 | 行情 / 籌碼 / 營收等 | `.cache/*_{YYYYMMDD}.*` | 當日有效 |
 | 資金流向的 TWSE 歷史 | `.cache/flows_twse_hist.json` | 依日期永久累積（最多 200 筆） |
 | 掃描歷史 | `.cache/scans/` | 保留最近 30 次 |
-| 使用者偏好 | `~/.tw_scanner_prefs.json` | 永久（雲端部署重啟會清空） |
+| 一般偏好（風格、漲跌顏色、上次校準日） | `~/.tw_scanner_prefs.json` | 永久（雲端部署重啟會清空） |
+| 財務偏好（總資金、月目標、虧損上限） | Neon `tw_kv`（登入後） | 永久；未登入時只在 session，不寫伺服器檔案 |
 | 持股 / 訊號日誌 / 交易紀錄（雲端） | Neon `tw_kv` 表 | 永久，見 [雲端設定](雲端設定.md) |
 | 交易紀錄（未登入） | `st.session_state` | 只在該瀏覽器分頁；刻意不寫伺服器檔案（公開部署會被其他訪客看到） |
 | UI 狀態 | `st.session_state` | 單一瀏覽器 session |

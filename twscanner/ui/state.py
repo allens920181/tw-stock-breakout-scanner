@@ -74,9 +74,9 @@ def persist_calibration_date():
     d = today_tw().isoformat()
     st.session_state["last_calibrated_date"] = d
     try:
-        _p = load_prefs()
+        _p = load_prefs(cloud_owner())
         _p["last_calibrated_date"] = d
-        save_prefs(_p)
+        save_prefs(_p, cloud_owner())
     except Exception:
         pass
 
@@ -97,7 +97,7 @@ def cloud_passcode():
 
 def get_prefs():
     """本 session 載入的使用者偏好（bootstrap 後可用）。"""
-    return st.session_state.get("_prefs") or load_prefs()
+    return st.session_state.get("_prefs") or load_prefs(cloud_owner())
 
 
 def _load_cloud_once():
@@ -118,13 +118,22 @@ def _load_cloud_once():
             journal.save_journal(cj)          # 還原雲端日誌到本機工作檔
     except Exception:
         pass
+    try:
+        # 個人財務數字只存在雲端：登入後套用
+        remote = store.load_prefs(owner) or {}
+        for k in ("total_capital", "month_target", "loss_limit_r"):
+            if k in remote:
+                st.session_state[k] = remote[k]
+        st.session_state["_prefs"] = {**st.session_state.get("_prefs", {}), **remote}
+    except Exception:
+        pass
     st.session_state["_cloud_loaded"] = True
 
 
 def _load_prefs_once():
     if "_prefs_loaded" in st.session_state:
         return
-    prefs = load_prefs()
+    prefs = load_prefs(cloud_owner())
     st.session_state["_prefs"] = prefs
     st.session_state["_prefs_loaded"] = True
     # 跨重啟保留「上次校準日期」以維持頻率提醒
