@@ -58,6 +58,13 @@ def test_google_allowlist():
     assert not is_allowed(None, allowed)
 
 
+def test_auth_without_secrets_file_does_not_crash():
+    """沒有 secrets.toml（本機、或還沒設定的部署）時，讀登入設定不能丟例外讓整個 App 開不起來。"""
+    from twscanner.ui import auth
+    assert auth.allowed_emails() == set()
+    assert auth.google_configured() is False
+
+
 def test_google_login_decisions():
     from twscanner.ui.auth import OWNER, decide_login
     ok = {"owner@example.com"}

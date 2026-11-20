@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from twscanner.analysis.goal import capital_for_target
 from twscanner.core.config import PROJECT_ROOT
 from twscanner.ui.components.blocks import conclusion, kpi_row
 from twscanner.ui.components.charts import plot
@@ -50,6 +49,14 @@ def _core_section():
         ("跑贏平均的週數", f"{nb['beat_avg_pct']:.0f}%", f"{nb['weeks']} 週"),
         ("平均每週符合", f"{nb['avg_count']:.0f} 檔", "可交易股中"),
     ])
+
+    st.markdown("### 怎麼用在每天的操作")
+    st.markdown(
+        "1. **先看大盤燈號**：空頭就不開新倉（這個指標在空頭沒有優勢）。\n"
+        "2. **候選股只看強勢區**（距一年高點 ≥ 90%）。找標的、今日決策都已依此排序，個股健檢會直接顯示。\n"
+        "3. **進場價、停損、張數照交易計畫卡**；指標只負責「挑哪幾檔」，不負責「何時賣」。\n"
+        "4. **分散 3–5 檔、每檔固定風險**：研究結果是一群股票的平均，單一檔仍可能賠錢。\n"
+        "5. **用自己的紀錄驗證**：做滿 30 筆後，看「實戰績效」的期望值是不是正的。")
 
     st.markdown("**8 個指標比一比：前 20% 的股票，1 個月比平均多賺幾 %**")
     rk = sorted(core["ranking"], key=lambda r: -r["all"]["excess_pct"])
@@ -100,13 +107,6 @@ def _core_section():
     fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.2, x=0))
     plot(fig)
 
-    st.markdown("### 怎麼用在每天的操作")
-    st.markdown(
-        "1. **先看大盤燈號**：空頭就不開新倉（這個指標在空頭沒有優勢）。\n"
-        "2. **候選股只看強勢區**（距一年高點 ≥ 90%）。找標的、今日決策都已依此排序，個股健檢會直接顯示。\n"
-        "3. **進場價、停損、張數照交易計畫卡**；指標只負責「挑哪幾檔」，不負責「何時賣」。\n"
-        "4. **分散 3–5 檔、每檔固定風險**：研究結果是一群股票的平均，單一檔仍可能賠錢。\n"
-        "5. **用自己的紀錄驗證**：做滿 30 筆後，看「實戰績效」的期望值是不是正的。")
     with st.expander("研究方法、限制與重跑方式"):
         st.markdown(
             f"- 資料：{core['stocks']} 檔目前上市股，{core['period']}，共 {core['weeks']} 週；每週排名一次。\n"
@@ -175,10 +175,7 @@ def _index_section(data, target):
         f"{tw['燈號擇時']['年化']:.0f}%（常在反彈初期還沒進場）。\n"
         "- **兩倍槓桿的回撤超過一半**，不適合拿來追固定月收入。\n"
         "- 這十年台股大多頭，年化 16% 以上不能當成未來的預期；長期規劃用 6–10% 比較穩妥。")
-    caps = [(f"{r * 100:.0f}%", capital_for_target(target, r)) for r in (0.06, 0.08, 0.10, 0.12)]
-    st.markdown(f"**平均每月賺 {target:,.0f} 元，需要多少本金？**")
-    st.dataframe(pd.DataFrame([{"假設年報酬": a, "需要本金（元）": b} for a, b in caps]), hide_index=True,
-                 column_config={"需要本金（元）": st.column_config.NumberColumn(format="localized")})
+    st.markdown(f"**平均每月賺 {target:,.0f} 元需要多少本金**，已放在「今日決策 → 本月目標 → 怎麼算」。")
     st.caption("短線選股在上面的研究裡沒有證明能穩定超過大盤，所以本金不足時，"
                "提高單筆風險或改用槓桿並不能讓目標變得可行，只會讓虧損月份更深。")
 

@@ -455,21 +455,22 @@ _GUIDE = """
 # ---------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------
-def render_flows_tab(cache_dir=".cache", tw_days=20):
-    st.markdown("## 資金流向")
-    st.caption("美國投資人的錢在哪、台股法人怎麼佈局、兩邊連動多強。資料：Yahoo Finance、TWSE 官方（每日更新）。")
+def _md_inline(text):
+    """摘要句裡的 **粗體** → HTML（其他字元跳脫）。"""
+    import html as _h
+    import re as _re
+    return _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", _h.escape(str(text)))
 
-    top = st.columns([1, 1, 4])
+
+def render_flows_tab(cache_dir=".cache", tw_days=20):
+    # 頁名已在頁首：這裡不再重複標題；說明只在還沒載入時出現
     if not st.session_state.get("flows_on"):
-        if top[0].button("載入資金流向", type="primary", key="flows_load"):
+        st.caption("美國投資人的錢在哪、台股法人怎麼佈局、兩邊連動多強。資料：Yahoo Finance、TWSE 官方（每日更新）。")
+        if st.button("載入資金流向", type="primary", key="flows_load"):
             st.session_state["flows_on"] = True
             st.rerun()
-        st.info("按下「載入資金流向」開始。第一次需抓台股近 20 日歷史，約 1~2 分鐘；之後每天只補新的一天。")
+        st.info("第一次需抓台股近 20 日歷史，約 1~2 分鐘；之後每天只補新的一天。")
         return
-    if top[0].button("重新整理", key="flows_refresh"):
-        _load_us.clear()
-        _load_tw.clear()
-        st.rerun()
 
     with st.spinner("抓取美股 / 跨資產資料 …"):
         us = _load_us(cache_dir)
@@ -483,25 +484,32 @@ def render_flows_tab(cache_dir=".cache", tw_days=20):
 
     st.markdown("### 現在錢往哪去")
     c1, c2, c3 = st.columns(3)
-    for col, title, key in ((c1, "美國資金", "us"), (c2, "台股資金", "tw"),
-                            (c3, "台美連動", "link")):
-        with col.container(border=True):
-            st.markdown(f"**{title}**")
+    for col, title, key in ((c1, "台股資金", "tw"), (c2, "美國資金", "us"), (c3, "台美連動", "link")):
+        with col.container(key=f"flowcard_{key}"):        # 無框淺灰卡：先一句結論，細項收合
             lines = summ.get(key) or ["暫無資料"]
-            st.markdown("\n".join(f"- {x}" for x in lines))
+            st.markdown(f"<div class='fc-title'>{title}</div><div class='fc-lead'>{_md_inline(lines[0])}</div>",
+                        unsafe_allow_html=True)
+            if len(lines) > 1:
+                with st.expander(f"細節 {len(lines) - 1} 項"):
+                    st.markdown("\n".join(f"- {x}" for x in lines[1:]))
     asof = []
     if us and us.get("asof") is not None:
         asof.append(f"美股資料截至 {pd.Timestamp(us['asof']):%Y-%m-%d}")
     if not twd["tw"]["inst"].empty:
         asof.append(f"台股資料截至 {twd['tw']['inst'].index[-1]:%Y-%m-%d}")
-    if asof:
-        st.caption("；".join(asof))
+    a1, a2 = st.columns([5, 1], vertical_alignment="center")
+    a1.caption("；".join(asof) if asof else "")
+    if a2.button("重新整理", key="flows_refresh", type="tertiary", use_container_width=True):
+        _load_us.clear()
+        _load_tw.clear()
+        st.rerun()
 
-    t_us, t_tw, t_link, t_help = st.tabs(["美國資金", "台股資金", "台美連動", "怎麼看"])
-    with t_us:
-        _render_us(us)
+    # 一看就懂的台股法人長條圖放第一個；RRG 門檻較高，放第二
+    t_tw, t_us, t_link, t_help = st.tabs(["台股資金", "美國資金", "台美連動", "怎麼看"])
     with t_tw:
         _render_tw(twd)
+    with t_us:
+        _render_us(us)
     with t_link:
         _render_link(us)
     with t_help:

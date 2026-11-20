@@ -193,6 +193,16 @@ def sync_strategy_mode(mode_labels):
             st.error(f"切換策略模式失敗：{e}")
 
 
+def holdings_signature(df):
+    """持股內容的指紋（只看有代號的列）：持股改了才需要重新分析；今日決策與持股頁共用。"""
+    if df is None or not len(df):
+        return ""
+    cols = [c for c in ("股票代號", "公司名稱", "成本價", "持有股數") if c in df.columns]
+    v = df.dropna(subset=["股票代號"]) if "股票代號" in df.columns else df
+    v = v[v["股票代號"].astype(str).str.strip() != ""] if "股票代號" in v.columns else v
+    return v[cols].astype(str).to_json() if len(v) else ""
+
+
 def analyze_holdings(holdings_df):
     """持股編輯表 → 出場建議（持股頁與今日決策共用）。沒填進場日由引擎統一推估。"""
     from twscanner.data.prices import fix_stock_code
@@ -225,5 +235,6 @@ def analyze_holdings(holdings_df):
             return False
         st.session_state["holdings_result"] = res
         st.session_state["holdings_analyzed_at"] = now_tw().strftime("%m/%d %H:%M")
+        st.session_state["_hold_analyzed_sig"] = holdings_signature(holdings_df)
         status.update(label=f"持股分析完成：{len(items)} 檔", state="complete")
     return True

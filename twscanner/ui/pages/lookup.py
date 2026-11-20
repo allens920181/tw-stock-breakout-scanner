@@ -1,6 +1,7 @@
 """個股健檢：這檔現在能不能買、手上的該不該賣、公司體質如何（財報白話）、K 線。"""
 import html
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from twscanner.analysis.indicators import high_1y_pct, high_1y_zone
@@ -10,13 +11,13 @@ from twscanner.services.today import trade_plan
 from twscanner.ui.components.blocks import (
     action_badge,
     buy_form,
-    callout,
     conclusion,
     kpi_row,
     plan_card,
     price_ladder_html,
     signed_value,
 )
+from twscanner.ui.components.charts import plot
 from twscanner.ui.format import colors, fmt_pct, fmt_price, fmt_r, strip_icon
 from twscanner.ui.settings import build_cfg
 from twscanner.ui.state import get_code_name_map
@@ -58,7 +59,11 @@ def _lead(res):
     if hd:
         act = strip_icon(hd.get("操作建議", ""))
         urgent = hd.get("賣出量") in ("全出", "賣半")
-        return (f"持有中：{act}", f"{hd.get('說明', '')}", "stop" if urgent else "info")
+        warn = hd.get("主動警示")
+        sub = str(hd.get("說明", "") or "")
+        if warn and warn != "—":
+            sub = (sub + "。" if sub else "") + f"注意：{warn}"
+        return (f"持有中：{act}", sub, "stop" if urgent or (warn and warn != "—") else "info")
     signal = sc.get("訊號判斷")
     if signal == "進場":
         return (f"可以考慮進場：{sc.get('操作建議', '')}", sc.get("評級理由"), "go")
@@ -83,8 +88,35 @@ def _exit_section(hd):
         + f"</div>{ladder}<div class='rule'>{html.escape(str(hd.get('說明', '')))}<br>"
         f"趨勢：{html.escape(str(hd.get('趨勢強度', '—')))} · 進場日：{html.escape(str(hd.get('進場日來源', '—')))}"
         f"</div></div>", unsafe_allow_html=True)
-    if hd.get("主動警示") and hd["主動警示"] != "—":
-        callout(f"持股警示：{html.escape(str(hd['主動警示']))}")
+
+
+def _price_chart(df, entry=None, stop=None, t1=None, t2=None, bars=60):
+    """報價下方的精簡價格圖：近 60 日收盤 + MA20 + 停損 / 進場 / 目標線（看盤 App 都把圖放在報價正下方）。"""
+    d = df.dropna(subset=["Close"]).tail(bars + 20).copy()
+    d["MA20"] = d["Close"].rolling(20).mean()
+    d = d.tail(bars)
+    if len(d) < 10:
+        return
+    c = colors()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=d.index, y=d["Close"], mode="lines", name="收盤", line=dict(color="#18181B", width=2),
+                             hovertemplate="%{x|%m/%d} 收盤 %{y:,.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=d.index, y=d["MA20"], mode="lines", name="MA20", line=dict(color="#A1A1AA", width=1.4),
+                             hovertemplate="MA20 %{y:,.2f}<extra></extra>"))
+    lv = [(v, n, col) for v, n, col in ((stop, "停損", c["down"]), (entry, "進場/成本", "#71717A"),
+                                        (t1, "+1R", c["up"]), (t2, "+2R", c["up"])) if v and v == v]
+    for v, n, col in lv:
+        fig.add_hline(y=float(v), line=dict(color=col, width=1, dash="dot"),
+                      annotation_text=f"{n} {float(v):,.2f}", annotation_position="top left",
+                      annotation_font=dict(size=10, color=col))
+    ys = list(d["Close"]) + [float(v) for v, _, _ in lv]
+    pad = (max(ys) - min(ys)) * 0.08 or 1
+    fig.update_yaxes(range=[min(ys) - pad, max(ys) + pad], gridcolor="#F1F1F3", tickformat=",.0f")
+    fig.update_xaxes(showgrid=False, tickformat="%m/%d")
+    fig.update_layout(height=250, margin=dict(l=4, r=4, t=8, b=4), showlegend=False, plot_bgcolor="#FFFFFF",
+                      paper_bgcolor="#FFFFFF", font=dict(family="Inter, Noto Sans TC, sans-serif", size=11),
+                      hovermode="x unified")
+    plot(fig)
 
 
 def _health_section(health):
@@ -94,14 +126,21 @@ def _health_section(health):
         return
     st.markdown(f"**{health['summary']}**　<span class='asof'>財報期間：{health['period']}（證交所最新公告）</span>",
                 unsafe_allow_html=True)
-    rows = []
-    for it in health["items"]:
+    def row(it):
         label, cls = VERDICT[it["verdict"]]
-        rows.append(f"<div class='rowline'><div class='health-v'><span class='badge {cls}'>{label}</span></div>"
-                    f"<div class='main'><div class='t'>{it['name']}　<span class='num'>{it['value']}</span></div>"
-                    f"<div class='d'>{html.escape(it['plain'])}<br><span style='font-size:0.75rem'>看懂這個數字：學習中心 › "
-                    f"{LESSON.get(it['lesson'], '財報')}</span></div></div></div>")
-    st.markdown("".join(rows), unsafe_allow_html=True)
+        return (f"<div class='rowline'><div class='health-v'><span class='badge {cls}'>{label}</span></div>"
+                f"<div class='main'><div class='t'>{it['name']}　<span class='num'>{it['value']}</span></div>"
+                f"<div class='d'>{html.escape(it['plain'])}<br><span style='font-size:0.75rem'>看懂這個數字：學習中心 › "
+                f"{LESSON.get(it['lesson'], '財報')}</span></div></div></div>")
+    # 短線操作只需要先看「注意」的地雷項目；其他預設收合（原本 8 項全展開約 900px，把價格圖擠到第三屏）
+    bad = [it for it in health["items"] if it["verdict"] == "bad"]
+    rest = [it for it in health["items"] if it["verdict"] != "bad"]
+    if bad:
+        st.markdown("".join(row(it) for it in bad), unsafe_allow_html=True)
+    if rest:
+        with st.expander(f"其他 {len(rest)} 項（" + "、".join(f"{it['name']} {VERDICT[it['verdict']][0]}" for it in rest[:3])
+                         + ("…" if len(rest) > 3 else "") + "）"):
+            st.markdown("".join(row(it) for it in rest), unsafe_allow_html=True)
     st.caption("對 1 個月內的短線操作，基本面用來「避開地雷」，進出場時機仍以技術面與交易計畫為準。")
 
 
@@ -161,10 +200,18 @@ def render():
            f"{fmt_pct(chg)}</span>" if chg is not None else "")
         + f"</div><div class='q-meta'>{asof_txt}</div></div>", unsafe_allow_html=True)
     conclusion(lead, sub, tone)
+    src = hd or {}
+    lv = dict(entry=src.get("成本價") or sc.get("進場參考價"), stop=src.get("停損價") or sc.get("停損價"),
+              t1=src.get("目標1(+1R半倉)") or sc.get("目標價1(+1R半倉)"),
+              t2=src.get("目標2(+2R出清)") or sc.get("目標價2(+2R出清)"))
+    if df is not None and len(df) > 30:
+        _price_chart(df, **lv)
+    rs = sc.get("相對強度RS%")
+    stop_gap = ((float(lv["stop"]) / float(price) - 1) * 100) if (lv["stop"] and price) else None
+    first = (("比大盤強（60 日）", signed_value(rs, fmt_pct(rs)), None) if rs is not None else
+             ("距停損", fmt_pct(stop_gap) if stop_gap is not None else "—", "跌到停損價還有多遠"))
     kpi_row([
-        ("比大盤強（60 日）", signed_value(sc.get("相對強度RS%"), fmt_pct(sc.get("相對強度RS%")))
-         if sc.get("相對強度RS%") is not None else "—",
-         None if sc.get("相對強度RS%") is not None else "沒通過品質過濾，未計算"),
+        first,
         ("等級 / 分數", f"{sc.get('綜合評級') or '未評級'}",
          f"{sc.get('評分顯示', sc.get('評分', '—'))} 分" if sc.get("綜合評級") else (sc.get("狀態") or None)),
         ("距一年高點（核心指標）", f"{h1y:.0f}%" if h1y is not None else "—", high_1y_zone(h1y)),
@@ -188,15 +235,11 @@ def render():
     _health_section(res.get("health"))
 
     if df is not None and len(df) > 30:
-        st.markdown("### K 線")
-        c = colors()
-        src = hd or {}
-        fig = make_kline(df, title="", entry=src.get("成本價") or sc.get("進場參考價"),
-                         stop=src.get("停損價") or sc.get("停損價"),
-                         target1=src.get("目標1(+1R半倉)") or sc.get("目標價1(+1R半倉)"),
-                         target2=src.get("目標2(+2R出清)") or sc.get("目標價2(+2R出清)"),
-                         recent_bars=120, up=c["up"], down=c["down"])
-        if fig:
-            st.plotly_chart(fig, use_container_width=True, config=CHART_CONFIG)
+        with st.expander("完整技術圖（K 線、成交量、KD、MACD）"):
+            c = colors()
+            fig = make_kline(df, title="", entry=lv["entry"], stop=lv["stop"], target1=lv["t1"], target2=lv["t2"],
+                             recent_bars=120, up=c["up"], down=c["down"])
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, config=CHART_CONFIG)
     _add_check(sc)
     st.caption("決策輔助，非投資建議。籌碼、營收、財報為官方公開資料的當日快照。")

@@ -1,6 +1,7 @@
 """頁首：頁名、日期、台股 / 美股 / 大資金狀態，與一句綜合操作建議。"""
 
 import html
+import re
 
 import streamlit as st
 
@@ -80,24 +81,40 @@ def _status_items(market_state, us_state):
     return items
 
 
+def short_advice(text):
+    """狀態列用的短建議：燈號已經寫了大盤狀態，只留「該怎麼做」。"""
+    t = str(text or "")
+    if "：" in t:
+        t = t.split("：", 1)[1]
+    return re.sub(r"（[^）]*）$", "", t).strip()
+
+
+def short_date(dt):
+    """11/20 週五"""
+    return f"{dt.month}/{dt.day} 週{WEEKDAYS[dt.weekday()]}"
+
+
 def render_header(title, market_state, last_scan_at=None, us_state=None, advice=True):
-    """頁首：左邊頁名與日期，右邊三個市場狀態（文字 + 小圓點），下面一行白話建議。不用框線與色條。"""
+    """
+    頁首：頁名，下面一行日期與同步狀態，再下面一條靠左的市場狀態列（三燈 + 該怎麼做）。
+    市場狀態是全系統最重要的開關，放在左側（NN/g：約 80% 注視落在左半），不放右上角；不用框線與色條。
+    """
     esc = html.escape
-    status = "".join(
+    lights = "".join(
         f"<span class='mkt-item' title='{esc(str(detail))}'><i class='dot {cls}'></i>"
         f"<span class='k'>{esc(name)}</span>{esc(label)}</span>"
         for name, label, cls, detail in _status_items(market_state, us_state))
     big = market_state.get("big_state") if market_state else None
     adv_text, adv_cls = overall_advice(market_state, us_state, big)
-    meta = zh_date(now_tw()) + (f" · 上次掃描 {last_scan_at}" if last_scan_at else "")
+    meta = short_date(now_tw()) + (f" · 上次掃描 {last_scan_at}" if last_scan_at else "")
     sync_text, sync_state = sync.status()
     sync_html = (f" · <span class='sync-state {sync_state}'><i class='dot {sync_state}'></i>{esc(sync_text)}</span>"
                  if sync_text else "")
+    adv_html = f"<span class='mkt-adv {adv_cls}'>{esc(short_advice(adv_text))}</span>" if advice else ""
     st.markdown(
-        f"<div class='page-head'><div><div class='page-title'>{esc(title)}</div>"
+        f"<div class='page-head'><div class='page-title'>{esc(title)}</div>"
         f"<div class='page-meta'>{esc(meta)}{sync_html}</div></div>"
-        f"<div class='mkt'>{status}</div></div>"
-        + (f"<div class='mkt-advice {adv_cls}'>{esc(adv_text)}</div>" if advice else "<div class='mkt-advice'></div>"),
+        f"<div class='mkt-strip'>{lights}{adv_html}</div>",
         unsafe_allow_html=True)
 
 

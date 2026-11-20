@@ -1,4 +1,9 @@
-"""持股與紀錄：今天哪幾檔要動（出場建議）→ 編輯持股 → 賣出後記錄 → 月損益與目標。"""
+"""
+持股與紀錄：今天哪幾檔要動 → 組合總覽 → 出場建議表（點一列記錄賣出）→ 編輯／匯入匯出。
+
+參考券商庫存頁：先總覽、再明細；同一份持股只顯示一張表，編輯在彈出視窗裡做；
+打開頁面就自動分析（不用找最下面的按鈕）。
+"""
 import io
 
 import pandas as pd
@@ -10,8 +15,8 @@ from twscanner.core.tz import today_tw
 from twscanner.data.names import lookup_names
 from twscanner.data.prices import fix_stock_code
 from twscanner.portfolio import trade_log
-from twscanner.ui.actions import analyze_holdings
-from twscanner.ui.components.blocks import asof, conclusion, empty, kpi_row, signed_value
+from twscanner.ui.actions import analyze_holdings, holdings_signature
+from twscanner.ui.components.blocks import conclusion, empty, kpi_row, signed_value
 from twscanner.ui.components.common import make_holdings_template
 from twscanner.ui.format import clean_stock_col, colors, fmt_money, strip_icon
 from twscanner.ui.glossary import HELP
@@ -20,6 +25,7 @@ from twscanner.ui.state import cloud_owner, get_base_config, get_code_name_map, 
 from twscanner.ui.theme import CHART_CONFIG
 
 HOLD_COLS = ["股票代號", "公司名稱", "成本價", "持有股數"]
+BASIC_COLS = ["股票", "操作建議", "賣出量", "報酬%", "R倍數", "停損價"]     # 預設只看要做決定的 6 欄
 URGENT_QTY = ("全出", "賣半")
 EXIT_RULES = """
 出場規則依序檢查，第一個成立的就是今天的建議：
@@ -80,7 +86,7 @@ def _totals(valid, result_df, etf_map):
     return cost, value
 
 
-def _results(h_df):
+def _results_head(h_df):
     qty = h_df.get("賣出量", pd.Series(dtype=str)).astype(str)
     n_sell, n_half = int((qty == "全出").sum()), int((qty == "賣半").sum())
     n_keep = len(h_df) - n_sell - n_half
@@ -90,6 +96,8 @@ def _results(h_df):
     else:
         conclusion(f"今天：{n_keep} 檔都續抱", "沒有觸發出場條件。收盤後再看一次即可。", "info")
 
+
+def _results(h_df):
     d = h_df.copy()
     d["_urgent"] = d.get("賣出量", pd.Series("", index=d.index)).isin(URGENT_QTY)
     d = d.sort_values(["_urgent", "報酬%"], ascending=[False, True]).reset_index(drop=True)
@@ -98,6 +106,8 @@ def _results(h_df):
     cols = ["股票", "操作建議", "賣出量", "報酬%", "R倍數", "目前價", "成本價", "停損價",
             "目標1(+1R半倉)", "目標2(+2R出清)", "移動停利(ATR)", "持有天數", "說明", "進場日來源"]
     view = view[[c for c in cols if c in view.columns]]
+    if not st.toggle("顯示全部欄位", key="hold_all_cols"):
+        view = view[[c for c in BASIC_COLS if c in view.columns]]
     c = colors()
 
     def row_style(r):
@@ -122,8 +132,6 @@ def _results(h_df):
                       height=min(36 * (len(view) + 1) + 4, 480),
                       on_select="rerun", selection_mode="single-row", key="hold_table")
     st.caption("點一列可以記錄賣出。")
-    with st.expander("出場規則怎麼判斷", expanded=False):
-        st.markdown(EXIT_RULES)
     rows = ev.selection.rows if ev and ev.selection else []
     if rows:
         _sell_form(d.iloc[rows[0]])
@@ -159,8 +167,11 @@ def _sell_form(r):
         st.rerun()
 
 
-def _toolbar():
-    t2, t3 = st.columns(2)
+def _toolbar(etf_map, empty_state=False):
+    t1, t2, t3 = st.columns(3)
+    if t1.button("新增持股" if empty_state else "編輯持股", type="primary" if empty_state else "secondary",
+                 use_container_width=True, key="hold_edit_open"):
+        _edit_dialog(etf_map)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         st.session_state["holdings_df"].to_excel(w, sheet_name="持股", index=False)
@@ -188,43 +199,41 @@ def _toolbar():
                 st.error(f"讀取失敗：{e}")
 
 
-def _editor(etf_map):
-    @st.fragment
-    def frag():
-        edited = st.data_editor(
-            st.session_state["holdings_df"], num_rows="dynamic", use_container_width=True,
-            key=f"holdings_editor_v{st.session_state['holdings_editor_version']}",
-            column_config={
-                "股票代號": st.column_config.TextColumn("股票代號", required=True, width="small", help="例：2330"),
-                "公司名稱": st.column_config.TextColumn("公司名稱", width="medium", help="留空後按「查詢名稱」自動帶入"),
-                "成本價": st.column_config.NumberColumn("成本價", min_value=0.0, step=0.01, format="%.2f",
-                                                     help=HELP["cost_price"]),
-                "持有股數": st.column_config.NumberColumn("持有股數", min_value=0, step=1000, format="%d",
-                                                       help=HELP["shares_held"]),
-            })
-        st.session_state["_holdings_edited"] = edited
-        pending = []
-        for _, r in edited.iterrows():
-            raw, name = r.get("股票代號"), r.get("公司名稱")
-            if raw and pd.notna(raw) and (name is None or pd.isna(name) or not str(name).strip()):
-                code = fix_stock_code(raw, etf_map)
-                if code:
-                    pending.append(code)
-        if pending and st.button(f"查詢名稱（{len(pending)} 檔）"):
-            found = lookup_names(pending, get_code_name_map())
-            new = edited.copy()
+@st.dialog("編輯持股", width="large")
+def _edit_dialog(etf_map):
+    """在彈出視窗裡編輯；按「儲存並分析」才寫回並重新分析（頁面上只留一張持股表）。"""
+    edited = st.data_editor(
+        st.session_state["holdings_df"], num_rows="dynamic", use_container_width=True,
+        key=f"holdings_editor_v{st.session_state['holdings_editor_version']}",
+        column_config={
+            "股票代號": st.column_config.TextColumn("股票代號", required=True, width="small", help="例：2330"),
+            "公司名稱": st.column_config.TextColumn("公司名稱", width="medium", help="留空會自動查名稱"),
+            "成本價": st.column_config.NumberColumn("成本價", min_value=0.0, step=0.01, format="%.2f",
+                                                 help=HELP["cost_price"]),
+            "持有股數": st.column_config.NumberColumn("持有股數", min_value=0, step=1000, format="%d",
+                                                   help=HELP["shares_held"]),
+        })
+    st.caption("每列一檔：代號、成本價、股數（1 張 = 1000 股）。公司名稱留空會自動帶入。")
+    c1, c2 = st.columns(2)
+    if c1.button("儲存並分析", type="primary", use_container_width=True):
+        new = edited.copy()
+        pending = [fix_stock_code(r.get("股票代號"), etf_map) for _, r in new.iterrows()
+                   if pd.notna(r.get("股票代號")) and str(r.get("股票代號")).strip()
+                   and (r.get("公司名稱") is None or pd.isna(r.get("公司名稱")) or not str(r.get("公司名稱")).strip())]
+        if pending:
+            found = lookup_names([p for p in pending if p], get_code_name_map())
             for i, r in new.iterrows():
                 code = fix_stock_code(r.get("股票代號"), etf_map) if pd.notna(r.get("股票代號")) else None
-                name = r.get("公司名稱")
-                if code in found and (name is None or pd.isna(name) or not str(name).strip()):
+                if code in found and (r.get("公司名稱") is None or pd.isna(r.get("公司名稱"))
+                                      or not str(r.get("公司名稱")).strip()):
                     new.at[i, "公司名稱"] = found[code]
-            st.session_state["holdings_df"] = new
-            _bump()
-            st.rerun(scope="fragment")
-    frag()
-    edited = st.session_state.get("_holdings_edited", st.session_state["holdings_df"])
-    st.session_state["holdings_df"] = edited     # 登入時由雲端同步在本次執行結尾自動上傳
-    return edited
+        st.session_state["holdings_df"] = _normalize(new)
+        st.session_state.pop("_holdings_edited", None)
+        st.session_state.pop("holdings_result", None)     # 內容變了：頁面重畫時會自動重新分析
+        _bump()
+        st.rerun()
+    if c2.button("取消", use_container_width=True):
+        st.rerun()
 
 
 def _holdings_tab():
@@ -233,35 +242,48 @@ def _holdings_tab():
     hdf = st.session_state["holdings_df"]
     valid = hdf.dropna(subset=["股票代號"])
     valid = valid[valid["股票代號"].astype(str).str.strip() != ""]
+    sig = holdings_signature(hdf)
     res = st.session_state.get("holdings_result")
+    # 打開頁面、或持股剛改過：自動分析（約 10–30 秒），不必找按鈕
+    if (len(valid) and (res is None or st.session_state.get("_hold_analyzed_sig") != sig)
+            and st.session_state.get("_hold_fail_sig") != sig):     # 失敗過就等使用者按「重新分析」，不要每次互動都重試
+        if analyze_holdings(valid):
+            st.session_state.pop("_hold_fail_sig", None)
+            st.rerun()
+        st.session_state["_hold_fail_sig"] = sig
+        res = st.session_state.get("holdings_result")
     result_df = res["df"] if res else None
 
     if result_df is not None and len(result_df):
-        _results(result_df)
-        asof(f"分析時間 {st.session_state.get('holdings_analyzed_at', '')}")
+        _results_head(result_df)
     elif len(valid):
-        conclusion(f"你有 {len(valid)} 檔持股，還沒分析", "按下方「分析持股」取得今天的出場建議。", "info")
+        conclusion(f"你有 {len(valid)} 檔持股，分析沒有完成", "多半是暫時抓不到價格，稍後按「重新分析」再試。", "info")
     else:
-        conclusion("目前沒有持股", "在下方表格輸入代號、成本與股數，或在交易計畫卡按「我已買進」。", "info")
+        conclusion("目前沒有持股", "按「新增持股」輸入代號、成本與股數，或在交易計畫卡按「我已買進」。", "info")
 
-    cost, value = _totals(valid, result_df, etf_map)
-    pnl = value - cost if value is not None and cost else None
-    kpi_row([
-        ("持股", f"{len(valid)} 檔", None),
-        ("總成本", fmt_money(cost) if cost else "—", None),
-        ("總現值", fmt_money(value) if value else "—", "需先分析持股" if value is None else None),
-        ("未實現損益", signed_value(pnl, fmt_money(pnl, signed=True)) if pnl is not None else "—",
-         signed_value(pnl / cost * 100) if pnl is not None and cost else None),
-    ])
-
-    st.markdown("### 編輯持股")
-    _toolbar()
-    edited = _editor(etf_map)
-    a1, a2 = st.columns([1.2, 4])
-    if a1.button("分析持股", type="primary", use_container_width=True, disabled=len(valid) == 0):
-        analyze_holdings(edited)
-        st.rerun()
-    a2.caption("抓最新收盤價並判斷出場建議。資料存在瀏覽器；登入雲端會自動保存，否則記得匯出備份。")
+    if len(valid):                                   # 先總覽，再明細
+        cost, value = _totals(valid, result_df, etf_map)
+        pnl = value - cost if value is not None and cost else None
+        kpi_row([
+            ("持股", f"{len(valid)} 檔", None),
+            ("總成本", fmt_money(cost) if cost else "—", None),
+            ("總現值", fmt_money(value) if value else "—", None),
+            ("未實現損益", signed_value(pnl, fmt_money(pnl, signed=True)) if pnl is not None else "—",
+             signed_value(pnl / cost * 100) if pnl is not None and cost else None),
+        ])
+    if result_df is not None and len(result_df):
+        _results(result_df)
+    _toolbar(etf_map, empty_state=not len(valid))
+    if len(valid):
+        a1, a2 = st.columns([1, 3], vertical_alignment="center")
+        if a1.button("重新分析", use_container_width=True, key="hold_reanalyze"):
+            st.session_state.pop("_hold_analyzed_sig", None)
+            st.session_state.pop("_hold_fail_sig", None)
+            st.rerun()
+        a2.caption(f"分析於 {st.session_state.get('holdings_analyzed_at', '—')} · 資料存在這個分頁；"
+                   "登入雲端會自動保存，否則記得匯出備份。")
+    with st.expander("出場規則怎麼判斷", expanded=False):
+        st.markdown(EXIT_RULES)
 
 
 def _month_chart(summ, target):

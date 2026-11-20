@@ -45,7 +45,10 @@ def google_configured():
 
 
 def allowed_emails():
-    raw = _secrets().get("ALLOWED_EMAILS", [])
+    try:                                  # 完全沒有 secrets 檔時 st.secrets.get 會丟例外
+        raw = _secrets().get("ALLOWED_EMAILS", [])
+    except Exception:
+        return set()
     if isinstance(raw, str):
         raw = raw.replace(";", ",").split(",")
     return {str(e).strip().lower() for e in raw if str(e).strip()}
