@@ -26,8 +26,25 @@ def test_strip_icon_keeps_chinese():
     assert strip_icon("⚠ 續抱·留意減碼") == "續抱·留意減碼"
 
 
-def test_sidebar_toggle_not_hidden():
-    """手機側欄預設收合：工具列（含展開側欄按鈕）不能被 CSS 藏起來。"""
+def test_nav_menu_not_hidden():
+    """頂部導覽在工具列裡；手機上導覽收進選單，開關是 stExpandSidebarButton。兩者都不能被 CSS 藏起來。"""
     import re
     hidden_rules = re.findall(r"([^{}]+)\{[^}]*visibility:\s*hidden", CSS)
     assert not any("stToolbar" in sel or "stExpandSidebarButton" in sel for sel in hidden_rules)
+
+
+def test_no_colored_side_bars_or_button_borders():
+    """設計規則：卡片不用左側色條、按鈕沒有深色細框（docs/DESIGN.md 第 4 節）。"""
+    import re
+    assert "border-left" not in CSS
+    rules = re.findall(r"([^{}]+)\{([^}]*)\}", CSS)
+    for sel, body in rules:
+        if "button" in sel.lower() or "PopoverButton" in sel:
+            m = re.search(r"border:\s*([^;!]+)", body)
+            assert m is None or m.group(1).strip() == "none", f"{sel.strip()} 有框線：{m.group(1)}"
+
+
+def test_brand_is_not_indigo():
+    from twscanner.ui.theme import COLORS
+    assert COLORS["primary"].upper() == "#18181B"
+    assert "4F46E5" not in CSS.upper()

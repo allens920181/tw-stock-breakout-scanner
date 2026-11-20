@@ -30,7 +30,7 @@ class _ListHandler(logging.Handler):
 
 
 def execute_scan(sb):
-    """依側欄的資料來源執行掃描，結果寫入 session_state。回傳是否成功。"""
+    """依掃描設定的資料來源執行掃描，結果寫入 session_state。回傳是否成功。"""
     items, input_path = None, None
     with st.status("掃描準備中 …", expanded=True) as status:
         if sb.mode == "掃描全台股":
@@ -49,7 +49,7 @@ def execute_scan(sb):
             tmp.close()
             input_path = tmp.name
         else:
-            status.update(label="請先在側欄上傳清單，或改選「全台股」", state="error")
+            status.update(label="請先在「找標的」上方的範圍上傳清單，或改選「全台股」", state="error")
             return False
 
         cfg = build_cfg()
@@ -123,7 +123,7 @@ def rescan_with_cache(toast=None):
 
 
 def sync_strategy_mode(mode_labels):
-    """側欄切換策略模式 → 自動用快取重算。"""
+    """切換策略模式 → 自動用快取重算。"""
     cur = st.session_state.get("strategy_mode", "breakout")
     if st.session_state.get("scan_cache") and st.session_state.get("_result_mode") not in (None, cur):
         try:

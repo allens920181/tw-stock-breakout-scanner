@@ -12,6 +12,7 @@ from twscanner.services.today import CONDITION_KEYS, sort_by_core, trade_plan
 from twscanner.ui.actions import execute_scan, rescan_with_cache, sync_strategy_mode
 from twscanner.ui.components.blocks import asof, buy_form, conclusion, empty, kpi_row, plan_card
 from twscanner.ui.format import clean_stock_col, colors
+from twscanner.ui.scan_controls import render_scan_controls
 from twscanner.ui.settings import build_cfg
 from twscanner.ui.state import get_base_config, persist_calibration_date
 
@@ -229,18 +230,16 @@ def _calibration(result):
         st.error(f"自動校準失敗：{e}")
 
 
-def render(sb):
+def render():
+    sb = render_scan_controls()
     if sb.run_btn and execute_scan(sb):
-        st.rerun()      # 今日決策分頁在前面已畫完，重跑讓它看到新的掃描結果
+        st.rerun()
     sync_strategy_mode(sb.mode_labels)
 
     if "result" not in st.session_state:
         conclusion("還沒有掃描結果",
-                   "三步驟：① 側欄（手機請點左上角「›」）選資料來源與策略模式 → ② 按「開始掃描」"
-                   "→ ③ 點結果表的一列，看入選理由與交易計畫；買進後按「我已買進」記入持股。", "info")
-        if st.button("用目前設定開始掃描", type="primary"):
-            execute_scan(sb)
-            st.rerun()
+                   "① 在上方選範圍、策略與風格 → ② 按「開始掃描」→ ③ 點結果表的一列，看入選理由與交易計畫；"
+                   "買進後按「我已買進」記入持股。", "info")
         return
 
     result = st.session_state["result"]

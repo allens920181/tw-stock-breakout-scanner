@@ -9,7 +9,6 @@ from twscanner.services import run_single_lookup
 from twscanner.services.today import trade_plan
 from twscanner.ui.components.blocks import (
     action_badge,
-    asof,
     buy_form,
     callout,
     conclusion,
@@ -30,14 +29,14 @@ LESSON = {"revenue": "營運 › 月營收", "margin": "財報 › 毛利率", "
 
 
 def _search():
-    q1, q2, q3 = st.columns([1.4, 1.2, 0.8])
+    q1, q2, q3 = st.columns([1.4, 1.2, 0.8], vertical_alignment="bottom")
     code = q1.text_input("股票代號", key="lookup_code", placeholder="例如 2330")
     cost = q2.number_input("我的成本價（沒持有就留 0）", min_value=0.0, value=0.0, step=0.5, key="lookup_cost",
                            help="填了才會給出場建議。沒填進場日時，系統以最近一次成交價觸及成本價的日子推估。")
-    q3.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
     go = q3.button("健檢", type="primary", key="lookup_btn", use_container_width=True)
     if go and code.strip():
-        with st.status("查詢中 …", expanded=False) as status:
+        slot = st.empty()        # 查完就清掉進度列，不留「完成」框
+        with slot.status("查詢中 …", expanded=False) as status:
             try:
                 res = run_single_lookup(
                     code.strip(), build_cfg(), company_name=get_code_name_map().get(code.strip(), ""),
@@ -48,6 +47,8 @@ def _search():
             except Exception as e:
                 st.session_state["lookup_result"] = {"error": str(e)}
                 status.update(label=f"查詢失敗：{e}", state="error")
+        if "error" not in st.session_state.get("lookup_result", {}):
+            slot.empty()
     elif go:
         st.warning("請輸入股票代號")
 
@@ -137,15 +138,12 @@ def render():
         return
     sc, hd = res["scoring"], res.get("holding")
     lead, sub, tone = _lead(res)
-    st.markdown(f"## {res['name']} <span style='color:var(--muted);font-weight:500'>"
-                f"{res['symbol'].split('.')[0]}</span>", unsafe_allow_html=True)
-    conclusion(lead, sub, tone)
     df = res.get("df")
+    chg = None
     if df is not None and len(df) > 1:
-        asof(f"價格資料截至 {df.index[-1]:%Y-%m-%d}")
-        chg = (df["Close"].iloc[-1] / df["Close"].iloc[-2] - 1) * 100
-    else:
-        chg = None
+        closes = df["Close"].dropna()
+        if len(closes) > 1:
+            chg = (closes.iloc[-1] / closes.iloc[-2] - 1) * 100
     rev = res.get("revenue") or {}
     h1y = sc.get("距一年高點%")
     if h1y is None:                     # 沒通過品質過濾時評分不會算，直接用價格資料算
@@ -153,9 +151,20 @@ def render():
     price = sc.get("目前現價") or sc.get("收盤價")
     if (price is None or price != price) and df is not None and len(df):
         price = float(df["Close"].dropna().iloc[-1])
+    # 報價式頁首（券商 App 的做法）：名稱與代號 → 大字股價與漲跌 → 結論
+    asof_txt = f"收盤資料 {df.index[-1]:%Y-%m-%d}" if df is not None and len(df) else ""
+    st.markdown(
+        f"<div class='quote'><div class='q-name'>{html.escape(str(res['name']))}"
+        f"<span class='q-code'>{html.escape(res['symbol'].split('.')[0])}</span></div>"
+        f"<div class='q-px'>{fmt_price(price)}"
+        + (f"<span class='q-chg' style='color:{colors()['up'] if chg > 0 else colors()['down'] if chg < 0 else 'var(--muted)'}'>"
+           f"{fmt_pct(chg)}</span>" if chg is not None else "")
+        + f"</div><div class='q-meta'>{asof_txt}</div></div>", unsafe_allow_html=True)
+    conclusion(lead, sub, tone)
     kpi_row([
-        ("現價", fmt_price(price),
-         signed_value(chg, fmt_pct(chg)) if chg is not None else None),
+        ("比大盤強（60 日）", signed_value(sc.get("相對強度RS%"), fmt_pct(sc.get("相對強度RS%")))
+         if sc.get("相對強度RS%") is not None else "—",
+         None if sc.get("相對強度RS%") is not None else "沒通過品質過濾，未計算"),
         ("等級 / 分數", f"{sc.get('綜合評級') or '未評級'}",
          f"{sc.get('評分顯示', sc.get('評分', '—'))} 分" if sc.get("綜合評級") else (sc.get("狀態") or None)),
         ("距一年高點（核心指標）", f"{h1y:.0f}%" if h1y is not None else "—", high_1y_zone(h1y)),

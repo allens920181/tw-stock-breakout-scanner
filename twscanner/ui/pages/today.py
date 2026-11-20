@@ -115,8 +115,18 @@ def render(sb):
     for w in risk["warnings"]:
         callout(w)
 
-    # 1. 持股
-    st.markdown("### 1. 先處理持股")
+    main, side = st.columns([1.75, 1], gap="large")
+    with main:
+        _holdings_section(t)
+        _candidates_section(t, scan_df, sb)
+    with side:
+        _goal_section(t)
+        st.markdown("### 交易紀律")
+        st.markdown("\n".join(f"{i}. {r}" for i, r in enumerate(RULES, 1)))
+
+
+def _holdings_section(t):
+    st.markdown("### 先處理持股")
     hold_edit = st.session_state.get("holdings_df")
     if not t["actions"]:
         if hold_edit is not None and len(hold_edit):
@@ -145,11 +155,12 @@ def render(sb):
             analyze_holdings(hold_edit)
             st.rerun()
 
-    # 2. 候選
-    st.markdown("### 2. 今日候選")
+
+def _candidates_section(t, scan_df, sb):
+    st.markdown("### 今日候選")
     if scan_df is None:
-        empty("今天還沒掃描", "依側欄的資料來源與策略模式掃描（全台股首次約 5–15 分鐘，同日重跑不到 1 分鐘）。"
-              "手機上請點左上角「›」打開側欄。")
+        empty("今天還沒掃描", "用「找標的」頁目前的範圍與策略掃描（全台股第一次約 5–15 分鐘，同一天再掃不到 1 分鐘）。"
+              "要換範圍或策略，到「找標的」頁上方調整。")
         if st.button("開始掃描", type="primary", key="today_scan"):
             execute_scan(sb)
             st.rerun()
@@ -160,12 +171,7 @@ def render(sb):
             for p in t["candidates"]:
                 plan_card(p)
     else:
-        st.caption("依訊號與分數排序。每張卡都是一份完整交易計畫：照計畫下單，不臨場改。")
+        st.caption("依訊號與「距一年高點」排序。每張卡都是一份完整交易計畫：照計畫下單，不臨場改。")
         for p in t["candidates"]:
             plan_card(p)
             buy_form(p, key=f"today_{p['code']}")
-
-    # 3. 目標與紀律
-    _goal_section(t)
-    with st.expander("交易紀律（每次下單前看一遍）", expanded=False):
-        st.markdown("\n".join(f"{i}. {r}" for i, r in enumerate(RULES, 1)))

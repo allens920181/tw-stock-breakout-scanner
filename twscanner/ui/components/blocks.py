@@ -16,9 +16,15 @@ def _e(s):
     return html.escape(str(s)) if s is not None else ""
 
 
+TONE_LABEL = {"go": "可行動", "stop": "注意", "wait": "觀望", "info": ""}
+
+
 def conclusion(lead, sub=None, tone="info"):
     """tone: go（可行動）/ stop（暫停、需處理）/ wait（中性等待）/ info。文字一律跳脫（資料裡常有 < 符號）。"""
-    st.markdown(f"<div class='conclusion {tone}'><span class='lead'>{_e(strip_icon(lead))}</span>"
+    label = TONE_LABEL.get(tone, "")
+    st.markdown(f"<div class='conclusion {tone}'>"
+                + (f"<span class='tone'>{label}</span>" if label else "")
+                + f"<span class='lead'>{_e(strip_icon(lead))}</span>"
                 + (f"<span class='sub'>{_e(sub)}</span>" if sub else "") + "</div>",
                 unsafe_allow_html=True)
 
@@ -75,7 +81,7 @@ def price_ladder_html(stop, entry, t1, t2, current=None):
     marks = []
     for label, p, color in (("停損", stop, "var(--down)"), ("進場", entry, "var(--text)"),
                             ("+1R", t1, "var(--up)"), ("+2R", t2, "var(--up)"),
-                            ("現價", current, "var(--primary)")):
+                            ("現價", current, "var(--info)")):
         if p:
             marks.append(f"<div class='mk' style='left:{x(p):.1f}%;background:{color}'></div>"
                          f"<div class='lb' style='left:{x(p):.1f}%;top:22px'>{label}</div>")

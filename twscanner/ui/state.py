@@ -141,6 +141,31 @@ def _load_prefs_once():
         st.session_state["last_calibrated_date"] = prefs["last_calibrated_date"]
 
 
+# 跨頁要保留的設定（widget 的值）。多頁導覽下，widget 不在本頁時 Streamlit 會清掉它的值；
+# 每次 rerun 開頭把值「重新指定」一次，就會變成一般 session 值而保留下來。
+PERSIST_KEYS = (
+    "scan_source", "universe_kind", "strategy_mode",
+    "month_target", "loss_limit_r", "total_capital", "risk_pct", "max_pos_pct", "f_atr_mult",
+    "_max_adv_pct_pct", "min_price", "min_avg_volume", "require_ma60", "min_risk_pct_slider",
+    "amb_rs_gate", "amb_min_rs", "w_breakout", "w_ma", "w_turnover", "w_kd", "w_macd", "w_rs", "w_trend",
+    "thr_enter", "thr_watch", "color_mode",
+    "cost_enabled", "cost_fee", "cost_disc", "cost_tax", "cost_slip", "cost_apply_fe", "stress_mult",
+)
+
+
+def persist_settings():
+    for k in PERSIST_KEYS:
+        if k in st.session_state:
+            st.session_state[k] = st.session_state[k]
+
+
+def seed(key, default):
+    """widget 只給 key、不給 value：第一次用 default，之後沿用使用者的值（不會跳「同時設定」警告）。"""
+    if key not in st.session_state:
+        st.session_state[key] = default
+    return key
+
+
 def bootstrap():
     """每次 rerun 開頭呼叫：設定雲端、載入雲端資料/偏好、初始化 session 預設值。"""
     from twscanner.ui.settings import apply_preset  # 避免循環 import

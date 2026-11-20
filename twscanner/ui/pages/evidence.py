@@ -57,7 +57,7 @@ def _core_section():
     vals = [r["all"]["excess_pct"] for r in rk]
     fig = go.Figure(go.Bar(
         x=vals, y=names, orientation="h",
-        marker_color=["#4F46E5" if r["name"] == "距一年高點" else "#CBD5E1" for r in rk],
+        marker_color=["#18181B" if r["name"] == "距一年高點" else "#D4D4D8" for r in rk],
         text=[f"{v:+.2f}%" for v in vals], textposition="outside", cliponaxis=False,
         hovertext=[f"{r['name']}<br>t 值 {r['all']['t']:.1f}<br>非空頭 {r['non_bear']['excess_pct']:+.2f}% · "
                    f"空頭 {r['bear']['excess_pct']:+.2f}%" for r in rk], hoverinfo="text"))
@@ -74,7 +74,7 @@ def _core_section():
     st.markdown("**離一年高點越近，之後 1 個月越好（扣成本）**")
     groups = [("離高點 30%+", "low"), ("全部", "all"), ("≥ 85%", "t85"), ("≥ 90%", "t90"), ("≥ 95%", "t95")]
     fig = go.Figure()
-    for label, src, color in (("大盤非空頭", nb, "#4F46E5"), ("大盤空頭", bear, "#CBD5E1")):
+    for label, src, color in (("大盤非空頭", nb, "#18181B"), ("大盤空頭", bear, "#D4D4D8")):
         ys = [src[k] for _, k in groups]
         fig.add_trace(go.Bar(name=label, x=[g for g, _ in groups], y=ys, marker_color=color,
                              text=[f"{v:+.1f}" for v in ys], textposition="outside", cliponaxis=False,
@@ -91,8 +91,8 @@ def _core_section():
     years = list(yr)
     xs = [f"'{y[2:]}" for y in years]
     fig = go.Figure()
-    fig.add_trace(go.Bar(name="強勢區 ≥ 90%", x=xs, y=[yr[y]["t90"] for y in years], marker_color="#4F46E5"))
-    fig.add_trace(go.Bar(name="全部可交易股", x=xs, y=[yr[y]["all"] for y in years], marker_color="#CBD5E1"))
+    fig.add_trace(go.Bar(name="強勢區 ≥ 90%", x=xs, y=[yr[y]["t90"] for y in years], marker_color="#18181B"))
+    fig.add_trace(go.Bar(name="全部可交易股", x=xs, y=[yr[y]["all"] for y in years], marker_color="#D4D4D8"))
     fig.update_layout(barmode="group")
     fig.update_xaxes(type="category", tickangle=0)
     fig.update_yaxes(title="1 個月平均 %", gridcolor="#F1F5F9", zeroline=True, zerolinecolor="#94A3B8")

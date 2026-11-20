@@ -28,7 +28,7 @@ from twscanner.ui.components.common import fmt_int, make_progress_block
 from twscanner.ui.format import clean_stock_col, colors, strip_icon
 from twscanner.ui.glossary import HELP
 from twscanner.ui.settings import apply_and_rescan, build_cfg
-from twscanner.ui.state import get_base_config, persist_calibration_date
+from twscanner.ui.state import get_base_config, persist_calibration_date, seed
 
 
 def render(sb):
@@ -47,21 +47,17 @@ def render(sb):
     with st.expander("交易成本（讓回測說真話）", expanded=False):
         st.caption("台股來回成本約 0.45–0.6%：未計成本的期望值是虛胖的。")
         cc1, cc2, cc3, cc4 = st.columns(4)
-        cc1.checkbox("計入交易成本", value=_bc.get("enabled", True), key="cost_enabled")
-        cc2.number_input("手續費率 %", 0.0, 0.5,
-                         _bc.get("fee_rate", 0.001425) * 100, 0.01, key="cost_fee")
-        cc3.number_input("券商折數", 0.1, 1.0,
-                         float(_bc.get("fee_discount", 1.0)), 0.05, key="cost_disc")
-        cc4.number_input("證交稅 %", 0.0, 0.5,
-                         _bc.get("tax_rate", 0.003) * 100, 0.05, key="cost_tax")
+        cc1.checkbox("計入交易成本", key=seed("cost_enabled", bool(_bc.get("enabled", True))))
+        cc2.number_input("手續費率 %", 0.0, 0.5, step=0.01,
+                         key=seed("cost_fee", float(_bc.get("fee_rate", 0.001425) * 100)))
+        cc3.number_input("券商折數", 0.1, 1.0, step=0.05, key=seed("cost_disc", float(_bc.get("fee_discount", 1.0))))
+        cc4.number_input("證交稅 %", 0.0, 0.5, step=0.05, key=seed("cost_tax", float(_bc.get("tax_rate", 0.003) * 100)))
         st.slider(
-            "滑價（單邊 %）", 0.0, 0.5,
-            float(st.session_state.get("cost_slip", _bc.get("slippage_pct", 0.0015) * 100)),
-            0.05, key="cost_slip",
+            "滑價（單邊 %）", 0.0, 0.5, step=0.05,
+            key=seed("cost_slip", float(_bc.get("slippage_pct", 0.0015) * 100)),
             help="小型股突破成交常偏離訊號價；買貴/賣便宜各扣此%。讓回測/壓力測試更誠實。",
         )
-        st.checkbox("因子驗證也扣成本", value=_bc.get("apply_to_factor_eval", False),
-                    key="cost_apply_fe",
+        st.checkbox("因子驗證也扣成本", key=seed("cost_apply_fe", bool(_bc.get("apply_to_factor_eval", False))),
                     help="預設關閉，避免因子 lift 與回測雙重成本口徑混淆")
         _rt = (st.session_state.get("cost_fee", 0.1425) / 100
                * st.session_state.get("cost_disc", 1.0) * 2
@@ -88,7 +84,7 @@ def render(sb):
             tmp.close()
             bt_input = tmp.name
         else:
-            st.error("請從側欄選擇資料來源（上傳清單或全台股）")
+            st.error("請先到「找標的」頁上方選擇範圍（上傳清單或全台股）")
             st.stop()
 
         cfg = build_cfg()
@@ -122,7 +118,7 @@ def render(sb):
 
     if "backtest_result" not in st.session_state:
         conclusion("還沒有回測結果",
-                   "設定天數後按「跑回測」。回測會用目前側欄的策略與參數，模擬過去每一天照系統進出場的結果。",
+                   "設定天數後按「跑回測」。回測會用「找標的」的策略與「設定」頁的參數，模擬過去每一天照系統進出場的結果。",
                    "info")
     else:
         bt = st.session_state["backtest_result"]
@@ -283,8 +279,7 @@ def render(sb):
             )
             sc1, sc2 = st.columns([2, 1])
             stress_mult = sc1.select_slider(
-                "滑價放大倍數", options=[2, 3, 5, 8],
-                value=int(st.session_state.get("stress_mult", 3)), key="stress_mult",
+                "滑價放大倍數", options=[2, 3, 5, 8], key=seed("stress_mult", 3),
             )
             if sc2.button("跑壓力測試", key="stress_btn", use_container_width=True):
                 resolved = bt.get("resolved")

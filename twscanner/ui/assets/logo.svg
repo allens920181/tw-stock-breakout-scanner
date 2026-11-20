@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="132" height="28" viewBox="0 0 132 28">
+  <rect x="0" y="4" width="20" height="20" rx="5" fill="#18181B"/>
+  <path d="M5 18 L9 13 L12 15.5 L16 9" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="28" y="20" font-family="'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif" font-size="16" font-weight="700" fill="#18181B">台股波段</text>
+</svg>

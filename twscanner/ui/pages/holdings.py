@@ -295,7 +295,7 @@ def _trades_io(raw):
     """未登入雲端時紀錄只在這個瀏覽器分頁裡：提供匯出 / 匯入。"""
     if not cloud_owner():
         st.caption("目前沒有登入雲端空間：紀錄只存在這個瀏覽器分頁，重新整理就會消失。"
-                   "請在側欄登入雲端，或用下方按鈕匯出備份。")
+                   "請到「設定」頁登入雲端，或用下方按鈕匯出備份。")
     c1, c2 = st.columns(2)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:

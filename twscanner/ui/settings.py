@@ -1,4 +1,4 @@
-"""側欄設定 ↔ 掃描設定：風格 Preset、build_cfg（session_state → cfg）、套用後免重抓重掃。"""
+"""設定 ↔ 掃描設定：風格 Preset、build_cfg（session_state → cfg）、套用後免重抓重掃。"""
 
 import copy
 
@@ -18,6 +18,7 @@ def apply_preset(key):
     st.session_state["min_avg_volume"] = int(p["filters"]["min_avg_volume"])
     st.session_state["require_ma60"] = bool(p["filters"]["require_above_ma60"])
     st.session_state["min_risk_pct"] = float(p["filters"]["min_risk_pct"])
+    st.session_state["min_risk_pct_slider"] = float(p["filters"]["min_risk_pct"]) * 100
     st.session_state["thr_enter"] = int(p["thresholds"]["enter"])
     st.session_state["thr_watch"] = int(p["thresholds"]["watch"])
     st.session_state["risk_pct"] = float(p["risk_per_trade_pct"]) * 100
@@ -25,7 +26,7 @@ def apply_preset(key):
 
 
 def apply_and_rescan(toast_msg="已套用設定"):
-    """套用側欄設定後，若有現成掃描資料則『免重抓』立即重掃，免使用者跨分頁手動操作。"""
+    """套用設定後，若有現成掃描資料則『免重抓』立即重掃，免使用者跨分頁手動操作。"""
     if st.session_state.get("scan_cache"):
         try:
             cfg2 = build_cfg()
@@ -43,8 +44,8 @@ def apply_and_rescan(toast_msg="已套用設定"):
 
 def build_run_config(base_cfg, ss):
     """
-    純函式：base config + 側欄設定值（session_state 或任何 Mapping）→ 本次掃描用 cfg。
-    不依賴 Streamlit，可單元測試。側欄 widget 的 key 即為 ss 的 key。
+    純函式：base config + 設定值（session_state 或任何 Mapping）→ 本次掃描用 cfg。
+    不依賴 Streamlit，可單元測試。設定頁與掃描列 widget 的 key 即為 ss 的 key。
     """
     cfg = copy.deepcopy(base_cfg)
     f, sc = base_cfg["filters"], base_cfg["scoring"]
@@ -75,7 +76,7 @@ def build_run_config(base_cfg, ss):
         cfg["scoring"]["regime_thresholds"] = rg_thr
     # ATR 停損倍數（建議模式可校準）
     cfg["filters"]["atr_mult"] = float(ss.get("f_atr_mult", f.get("atr_mult", 1.5)))
-    # 潛伏 RS 硬門檻（側欄可調）
+    # 潛伏 RS 硬門檻（設定頁可調）
     cfg.setdefault("strategy", {}).setdefault("ambush", {})
     cfg["strategy"]["ambush"]["require_positive_rs"] = bool(
         ss.get("amb_rs_gate", amb.get("require_positive_rs", True)))
@@ -101,5 +102,5 @@ def build_run_config(base_cfg, ss):
 
 
 def build_cfg():
-    """目前側欄設定 → 本次掃描 cfg（各分頁按下執行時呼叫）。"""
+    """目前設定 → 本次掃描 cfg（各分頁按下執行時呼叫）。"""
     return build_run_config(get_base_config(), st.session_state)

@@ -20,12 +20,12 @@ twscanner/
 ├── reporting/         輸出：Excel 報告、K 線圖
 ├── services/          應用流程：掃描、單檔健檢、持股分析、研究、今日決策 —— GUI 與 CLI 共用
 ├── ui/                Streamlit 介面
-│   ├── app.py         外殼：頁面設定 → 狀態 → 樣式 → 側欄 → 頁首 → 分頁（PAGES 註冊表、錯誤隔離）
+│   ├── app.py         外殼：頁面設定 → 狀態 → 樣式 → 頂部導覽 → 頁首 → 目前頁（PAGES 註冊表、錯誤隔離）
 │   ├── state.py       快取載入、雲端/偏好 bootstrap、持股與交易紀錄的 session 存取
-│   ├── settings.py    側欄設定 → 掃描 cfg（build_run_config 為純函式）
+│   ├── settings.py    設定值 → 掃描 cfg（build_run_config 為純函式）
 │   ├── actions.py     跨頁共用的動作：執行掃描、分析持股、用快取重算
 │   ├── format.py      數字格式與漲跌色（紅漲綠跌 / 綠漲紅跌）—— 全站唯一來源
-│   ├── sidebar.py     側欄 UI，回傳 SidebarState
+│   ├── scan_controls.py 找標的頁頂端的掃描列；current_scan_state() 給其他頁用
 │   ├── theme.py       CSS token 與樣式
 │   ├── glossary.py    名詞說明（help tooltip 與學習中心名詞表共用）
 │   ├── components/    blocks（結論句、KPI、徽章、交易計畫卡、空狀態）、頁首、圖表
@@ -91,17 +91,17 @@ strategy  market
 1. `twscanner/strategy/<mode>.py`：提供 `analyze_<mode>(...)`，回傳與 `scoring.analyze_stock` 相同欄位的 dict。
 2. 在 `services/scan.py` 的 `analyze_fn` 分派處（目前 `ambush` → `analyze_ambush`，其餘 → `analyze_stock`）加上新模式。
 3. 參數放進 `config.yaml` 的 `strategy.<mode>`。
-4. 在 `ui/sidebar.py` 的策略模式選項加上名稱與說明。
+4. 在 `ui/scan_controls.py` 的 `MODE_LABELS` / `MODE_HELP` 加上名稱與說明。
 
 ### 新增一個分頁
 
-1. `twscanner/ui/pages/<name>.py`，提供 `render()`；版面照 [DESIGN.md](DESIGN.md)：結論句 → KPI → 主體 → 進階；若需要「資料來源 / 開始掃描」等側欄互動結果，改成 `render(sb)`。
-2. 在 `twscanner/ui/app.py` 的 `PAGES` 加一行 `(標題, 模組, 是否需要 SidebarState)`。
-3. 重的運算放在 `services/` 或 `market/`，並在頁面用 `st.cache_data` 包住。Streamlit 每次互動都會重跑所有分頁，避免在 `render()` 裡直接抓網路資料。
+1. `twscanner/ui/pages/<name>.py`，提供 `render()`；版面照 [DESIGN.md](DESIGN.md)：結論句 → KPI → 主體 → 進階；若需要掃描設定（資料來源等），改成 `render(sb)`，`sb` 是 `ScanState`。
+2. 在 `twscanner/ui/app.py` 的 `PAGES` 加一行 `(網址, 導覽名稱, 頁首標題, 模組, 是否需要掃描設定)`。
+3. 重的運算放在 `services/` 或 `market/`，並在頁面用 `st.cache_data` 包住。Streamlit 每次互動都會重跑目前這一頁，避免在 `render()` 裡直接抓網路資料。
 
-### 新增側欄設定
+### 新增設定
 
-1. 在 `ui/sidebar.py` 加 widget，並給一個 `key`。
+1. 在 `ui/pages/settings_page.py` 加 widget，用 `key=seed("名稱", 預設值)`（不要再給 `value`），並把 key 加進 `state.PERSIST_KEYS`。
 2. 在 `ui/settings.py` 的 `build_run_config` 把該 key 對應進 cfg。
 3. 在 `tests/test_ui_settings.py` 加一個斷言。
 

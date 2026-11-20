@@ -73,7 +73,7 @@ def render_drawdown_chart(trades):
     fig.add_trace(
         go.Scatter(
             x=trades["entry_date"], y=trades["累積R"], mode="lines",
-            line=dict(color="#4F46E5", width=2),
+            line=dict(color="#18181B", width=2),
             fill="tozeroy", fillcolor="rgba(79, 70, 229, 0.08)",
             name="累積 R",
         ),

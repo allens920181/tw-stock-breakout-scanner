@@ -1,4 +1,6 @@
-"""頁首：台股 / 美股 / 大資金三顆燈 + 綜合操作建議。"""
+"""頁首：頁名、日期、台股 / 美股 / 大資金狀態，與一句綜合操作建議。"""
+
+import html
 
 import streamlit as st
 
@@ -50,77 +52,55 @@ def zh_date(dt):
     return f"{dt.year} 年 {dt.month} 月 {dt.day} 日（週{WEEKDAYS[dt.weekday()]}）"
 
 
-def render_header(market_state, last_scan_at=None, us_state=None):
-    """整合的 header：左側標題，右側大盤三 chip + 綜合判斷建議 + 日期/上次掃描"""
-    date_str = zh_date(now_tw())
-    chips = []
-
-    def _clean(label):
-        for sym in ["🟢", "🔴", "🟡", "⚪"]:
+def _status_items(market_state, us_state):
+    """台股 / 美股 / 大資金 → [(名稱, 狀態文字, css class, 說明)]。無資料時顯示「待掃描」。"""
+    def clean(label):
+        for sym in ("🟢", "🔴", "🟡", "⚪"):
             label = label.replace(sym, "")
         return label.strip()
 
-    def _chip(name, label, cls, detail):
-        chips.append(
-            f"<div class='hdr-status {cls}' title='{detail}'>"
-            f"<span class='dot'></span><b>{name} {label}</b></div>"
-        )
-
-    # 三顆燈永遠顯示；無資料時顯示「待掃描」灰燈，避免看起來像壞掉
+    items = []
     if market_state and market_state.get("regime") not in (None, "unknown"):
-        _chip("台股", _clean(market_state["label"]), chip_cls(market_state["regime"]),
-              market_state.get("detail", ""))
+        items.append(("台股", clean(market_state["label"]), chip_cls(market_state["regime"]),
+                      market_state.get("detail", "")))
     else:
-        _chip("台股", "待掃描", "unknown", "按「開始掃描」後更新")
-
+        items.append(("台股", "待掃描", "unknown", "掃描後更新"))
     if us_state and us_state.get("regime") not in (None, "unknown"):
-        _chip("美股", _clean(us_state["label"]), chip_cls(us_state["regime"]),
-              us_state.get("detail", ""))
+        items.append(("美股", clean(us_state["label"]), chip_cls(us_state["regime"]), us_state.get("detail", "")))
     else:
-        _chip("美股", "待掃描", "unknown", "按「開始掃描」後更新")
-
-    big_state = market_state.get("big_state") if market_state else None
-    if big_state:
-        _bf = big_state.get("position_factor", 1.0)
-        bcls = "bull" if _bf >= 1.0 else ("neutral" if _bf >= 0.75 else "bear")
-        _chip("大資金", _clean(big_state.get("label", "")), bcls,
-              big_state.get("detail", ""))
+        items.append(("美股", "待掃描", "unknown", "掃描後更新"))
+    big = market_state.get("big_state") if market_state else None
+    if big:
+        bf = big.get("position_factor", 1.0)
+        items.append(("大資金", clean(big.get("label", "")), "bull" if bf >= 1.0 else ("neutral" if bf >= 0.75 else "bear"),
+                      big.get("detail", "")))
     else:
-        _chip("大資金", "待掃描", "unknown",
-              "外資台指期/台幣/大盤融資，掃描時計算")
+        items.append(("大資金", "待掃描", "unknown", "外資台指期、台幣、大盤融資，掃描時計算"))
+    return items
 
-    status_html = "<div class='hdr-chips'>" + "".join(chips) + "</div>" if chips else ""
-    last = f" · 上次掃描 {last_scan_at}" if last_scan_at else ""
 
-    adv_text, adv_cls = overall_advice(market_state, us_state, big_state)
-    advice_html = (
-        f"<div class='hdr-advice {adv_cls}'><span class='dot'></span>"
-        f"<b>判斷建議</b>　{adv_text}</div>"
-    )
-
+def render_header(title, market_state, last_scan_at=None, us_state=None, advice=True):
+    """頁首：左邊頁名與日期，右邊三個市場狀態（文字 + 小圓點），下面一行白話建議。不用框線與色條。"""
+    esc = html.escape
+    status = "".join(
+        f"<span class='mkt-item' title='{esc(str(detail))}'><i class='dot {cls}'></i>"
+        f"<span class='k'>{esc(name)}</span>{esc(label)}</span>"
+        for name, label, cls, detail in _status_items(market_state, us_state))
+    big = market_state.get("big_state") if market_state else None
+    adv_text, adv_cls = overall_advice(market_state, us_state, big)
+    meta = zh_date(now_tw()) + (f" · 上次掃描 {last_scan_at}" if last_scan_at else "")
     st.markdown(
-        f"""
-<div class='app-header'>
-  <div>
-    <div class='app-title'>台股波段決策系統</div>
-    <div class='app-sub'>找標的 · 管持股 · 控風險 · 看懂市場</div>
-  </div>
-  <div class='hdr-right'>
-    {status_html}
-    <div class='app-date'>{date_str}{last}</div>
-  </div>
-</div>
-{advice_html}
-""",
-        unsafe_allow_html=True,
-    )
+        f"<div class='page-head'><div><div class='page-title'>{esc(title)}</div>"
+        f"<div class='page-meta'>{esc(meta)}</div></div>"
+        f"<div class='mkt'>{status}</div></div>"
+        + (f"<div class='mkt-advice {adv_cls}'>{esc(adv_text)}</div>" if advice else "<div class='mkt-advice'></div>"),
+        unsafe_allow_html=True)
 
 
-def render_market_header():
-    """頁首：優先用本次掃描的大盤狀態，沒有就即時抓（快取）。"""
+def render_page_header(title, advice=True):
+    """優先用本次掃描的大盤狀態，沒有就即時抓（快取）。"""
     last_scan_at = st.session_state.get("last_scan_at")
-    market_state = None
-    us_state = None
+    market_state = us_state = None
     if "result" in st.session_state:
         market_state = st.session_state["result"].get("market_state")
         if market_state:
@@ -135,4 +115,4 @@ def render_market_header():
             us_state = get_us_state_cached()
         except Exception:
             us_state = None
-    render_header(market_state, last_scan_at, us_state=us_state)
+    render_header(title, market_state, last_scan_at, us_state=us_state, advice=advice)
