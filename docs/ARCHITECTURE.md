@@ -105,6 +105,14 @@ strategy  market
 2. 在 `ui/settings.py` 的 `build_run_config` 把該 key 對應進 cfg。
 3. 在 `tests/test_ui_settings.py` 加一個斷言。
 
+### 掃描資料池（換範圍不用重抓）
+
+`services/scan.py` 的 `split_by_pool` / `merge_pool`：每次掃描下載到的原始資料（價格歷史、股數、現價、財報日，以及全市場的籌碼、融資、營收、大盤）併進「當日資料池」（`state.current_pool`，跨日作廢）。
+
+- 掃描時先從池子切出範圍內的股票，**只下載池子裡沒有的**。
+- 換範圍時（`pages/scan.py::_scope_changed`）：池子已涵蓋 → 自動重算，不用按按鈕；沒涵蓋 → 提示「幾檔沿用、只需下載幾檔」。
+- 使用者按「開始掃描」且池子的現價超過 20 分鐘 → 只重抓現價（`refresh_prices`）；價格歷史本來就以日為單位快取在磁碟。
+
 ## 四、開發流程
 
 ```bash

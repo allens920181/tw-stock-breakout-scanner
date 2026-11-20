@@ -79,6 +79,8 @@
 - **pandas 3 的字串用 pyarrow（RE2）**，`\w` 只認 ASCII，`.str.replace(r"\w…")` 會把中文刪掉。用 Python `re`（`strip_icon`）。
 - **所有分頁每次都會重跑**，而且由左到右畫；後面分頁產生的資料（掃描、回測）存好後要 `st.rerun()`，前面的今日決策才會更新。
 - **`st.cache_data` 會快取「抓不到」的結果**；暫時失敗時丟例外（`state._NotReady`），不要回傳 unknown。
+- **分段選擇（`st.segmented_control`）要加 `required=True`**：否則再點一次已選的選項會變成「沒選」，下面的內容跟著消失。
+- **上傳檔用 `on_change` 存起來**：在 callback 裡存，重畫前就生效，按鈕標籤才會顯示新檔名。
 - **多頁導覽下，不在本頁的 widget 值會被清掉**：要跨頁保留就加進 `state.PERSIST_KEYS`；上傳檔存成 bytes（`scan_controls._Upload`）。
 - **公開部署時伺服器檔案是所有訪客共用的**：個人資料（持股、交易）只放 session 或登入後的雲端。
 

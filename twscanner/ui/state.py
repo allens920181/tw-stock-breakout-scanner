@@ -65,6 +65,28 @@ def get_code_name_map():
         return {}
 
 
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def get_universe_items(kind):
+    """全台股清單（twse / twse-common / twse-etf）→ [{code, company_name}]；失敗丟例外（不快取）。"""
+    raw = fetch_twse_universe(include_common=kind in ("twse", "twse-common"),
+                              include_etf=kind in ("twse", "twse-etf"))
+    if not raw:
+        raise _NotReady("全台股清單暫時抓不到")
+    return [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
+
+
+def current_pool():
+    """今天的資料池（跨日就作廢：價格與籌碼每天都會變）。"""
+    p = st.session_state.get("data_pool")
+    if p and p.get("date") == today_tw().isoformat():
+        return p["data"]
+    return None
+
+
+def save_pool(pool, fetched_at):
+    st.session_state["data_pool"] = {"date": today_tw().isoformat(), "at": fetched_at, "data": pool}
+
+
 def cloud_owner():
     return st.session_state.get("cloud_owner")
 

@@ -226,3 +226,47 @@ def test_candidates_sorted_by_core_indicator():
     plans = candidates(df)
     assert [p["code"] for p in plans] == ["2222", "1111", "4444", "3333"]
     assert plans[0]["reasons"][0] == "距一年高點 98%（強勢區）"
+
+
+def test_data_pool_split_and_merge():
+    from twscanner.services.scan import merge_pool, split_by_pool
+
+    def cache(codes, nf=(), price=1.0):
+        return {"items": [{"code": c, "company_name": c} for c in list(codes) + list(nf)],
+                "resolved": [{"symbol": f"{c}.TW", "company_name": c, "df": None} for c in codes],
+                "not_found": [(c, c) for c in nf],
+                "shares_map": {f"{c}.TW": 1 for c in codes}, "price_map": {f"{c}.TW": price for c in codes},
+                "earnings_map": {}, "chips_map": {"x": 1}, "margin_map": {}, "revenue_map": {},
+                "market_state": {"regime": "bull"}}
+
+    items = [{"code": c, "company_name": c} for c in ("2330", "2317", "9999", "1101")]
+    sub, missing = split_by_pool(None, items)
+    assert sub is None and len(missing) == 4
+
+    pool = merge_pool(None, cache(["2330", "2317"], nf=["9999"]))
+    sub, missing = split_by_pool(pool, items)
+    assert [m["code"] for m in missing] == ["1101"]               # 查無的 9999 不再抓
+    assert [r["symbol"] for r in sub["resolved"]] == ["2330.TW", "2317.TW"]
+    assert sub["not_found"] == [("9999", "9999")] and sub["market_state"]["regime"] == "bull"
+
+    pool = merge_pool(pool, cache(["1101", "2330"], price=2.0))    # 補抓後合併，新資料覆蓋
+    sub, missing = split_by_pool(pool, items)
+    assert missing == [] and len(sub["resolved"]) == 3
+    assert sub["price_map"]["2330.TW"] == 2.0 and sub["price_map"]["2317.TW"] == 1.0
+
+    sub, missing = split_by_pool(pool, items[:1])                   # 子集：只帶需要的資料
+    assert missing == [] and list(sub["price_map"]) == ["2330.TW"]
+
+
+def test_refresh_prices_only_touches_subset(monkeypatch):
+    import twscanner.services.scan as scan
+    seen = {}
+
+    def fake(symbols, workers):
+        seen["symbols"] = list(symbols)
+        return {s: 99.0 for s in symbols} | {"2317.TW": None}
+    monkeypatch.setattr(scan, "fetch_all_current_prices", fake)
+    cache = {"resolved": [{"symbol": "2330.TW"}], "price_map": {"2330.TW": 1.0, "2317.TW": 5.0}}
+    out = scan.refresh_prices(cache, {"data": {"max_workers": 2}})
+    assert seen["symbols"] == ["2330.TW"]
+    assert out == {"2330.TW": 99.0, "2317.TW": 5.0}          # 抓不到的不覆蓋成 None

@@ -5,6 +5,7 @@
 桌機一列排完、手機自動換行，不需要側欄。其他頁（今日決策、策略驗證）用 current_scan_state()
 讀同一組設定，不重畫控制項。
 """
+import hashlib
 from dataclasses import dataclass, field
 
 import streamlit as st
@@ -43,6 +44,22 @@ class _Upload:
         return self._data
 
 
+def scope_key(sb):
+    """範圍的識別：換了範圍（或換了上傳檔）就不同。"""
+    if sb.mode == "掃描全台股":
+        return f"universe:{sb.universe_kind}"
+    if sb.uploaded:
+        data = sb.uploaded.getvalue()
+        return f"upload:{getattr(sb.uploaded, 'name', '')}:{hashlib.md5(data).hexdigest()}"
+    return "upload:none"
+
+
+def scope_label(sb):
+    if sb.mode == "掃描全台股":
+        return f"全台股（{UNIVERSE_LABELS.get(sb.universe_kind, sb.universe_kind)}）"
+    return f"上傳清單 {getattr(sb.uploaded, 'name', '')}" if sb.uploaded else "上傳清單（未選檔）"
+
+
 def current_scan_state(run_btn=False):
     source = st.session_state.get("scan_source", "universe")
     up = st.session_state.get("uploaded_list")
@@ -60,6 +77,13 @@ def _source_label():
     return f"範圍 · {UNIVERSE_LABELS.get(st.session_state.get('universe_kind', 'twse'), '全台股')}"
 
 
+def _store_upload():
+    """上傳後立刻存成 bytes（callback 在重畫前執行，範圍按鈕的標籤才會是新檔名）。"""
+    f = st.session_state.get("scan_upload")
+    if f is not None:
+        st.session_state["uploaded_list"] = {"name": f.name, "data": f.getvalue()}
+
+
 def render_scan_controls():
     """畫出控制列，回傳 ScanState（含本次是否按下開始掃描）。"""
     base_cfg = get_base_config()
@@ -71,12 +95,11 @@ def render_scan_controls():
     bar = st.container(key="scanbar")             # CSS 用 .st-key-scanbar：手機排成 2×2，不疊成四列
     c1, c2, c3, c4 = bar.columns([1.5, 1.1, 1.0, 0.9], vertical_alignment="bottom")
     with c1.popover(_source_label(), use_container_width=True):
-        st.segmented_control("資料來源", list(SOURCE_LABELS), format_func=SOURCE_LABELS.get,
+        st.segmented_control("資料來源", list(SOURCE_LABELS), format_func=SOURCE_LABELS.get, required=True,
                              key="scan_source", label_visibility="collapsed")
         if st.session_state.get("scan_source") == "upload":
-            f = st.file_uploader("上傳 xlsx（欄位：股票代號、公司名稱）", type=["xlsx"], key="scan_upload")
-            if f is not None:
-                st.session_state["uploaded_list"] = {"name": f.name, "data": f.getvalue()}
+            st.file_uploader("上傳 xlsx（欄位：股票代號、公司名稱）", type=["xlsx"], key="scan_upload",
+                             on_change=_store_upload)
             st.download_button("下載清單範本", data=make_stock_list_template(), file_name="股票清單_範本.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:

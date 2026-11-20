@@ -10,12 +10,14 @@ import pandas as pd
 import streamlit as st
 
 from twscanner.core.tz import now_tw, today_tw
-from twscanner.data.universe import fetch_twse_universe
+from twscanner.data.prices import load_stock_list
 from twscanner.services import run_scan
+from twscanner.services.scan import merge_pool, refresh_prices, split_by_pool
 from twscanner.storage import cloud as store
 from twscanner.storage.history import cleanup_old, save_scan
+from twscanner.ui.scan_controls import scope_key, scope_label
 from twscanner.ui.settings import build_cfg
-from twscanner.ui.state import cloud_owner
+from twscanner.ui.state import cloud_owner, current_pool, get_universe_items, save_pool
 
 log = logging.getLogger(__name__)
 
@@ -29,30 +31,64 @@ class _ListHandler(logging.Handler):
         self.buf.append(self.format(record))
 
 
-def execute_scan(sb):
-    """依掃描設定的資料來源執行掃描，結果寫入 session_state。回傳是否成功。"""
-    items, input_path = None, None
+def scope_items(sb, cfg):
+    """目前範圍要掃哪些股票 → [{code, company_name}]；上傳清單沒選檔回 None。"""
+    if sb.mode == "掃描全台股":
+        return get_universe_items(sb.universe_kind)
+    if not sb.uploaded:
+        return None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp.write(sb.uploaded.getvalue())
+    return load_stock_list(tmp.name, cfg["etf_fix_map"])
+
+
+def pool_coverage(sb):
+    """(範圍內股票數, 需要下載的檔數)；範圍讀不到時回 None。給「換範圍」提示用。"""
+    try:
+        items = scope_items(sb, build_cfg())
+    except Exception:
+        return None
+    if not items:
+        return None
+    _, missing = split_by_pool(current_pool(), items)
+    return len(items), len(missing)
+
+
+PRICE_STALE_MIN = 20     # 按「開始掃描」時，資料池的現價超過這麼久就重抓現價
+
+
+def _pool_age_min():
+    p = st.session_state.get("data_pool") or {}
+    try:
+        h, m = map(int, str(p.get("at", "")).split(":"))
+    except ValueError:
+        return None
+    now = now_tw()
+    return (now.hour * 60 + now.minute) - (h * 60 + m)
+
+
+def execute_scan(sb, fresh_prices=True):
+    """
+    依目前範圍掃描，結果寫入 session_state。回傳是否成功。
+    今天已經下載過的股票直接用資料池（只補抓缺的）：先掃全台股，之後換「僅普通股」或上傳清單都不必重抓。
+    fresh_prices：使用者按下「開始掃描」時為 True — 沿用的資料若現價已舊（> 20 分鐘）就重抓現價；
+    換範圍自動重算時為 False，直接用池子裡的資料。
+    """
     with st.status("掃描準備中 …", expanded=True) as status:
-        if sb.mode == "掃描全台股":
-            try:
-                status.update(label="抓取全台股清單 …")
-                raw = fetch_twse_universe(
-                    include_common=sb.universe_kind in ("twse", "twse-common"),
-                    include_etf=sb.universe_kind in ("twse", "twse-etf"))
-                items = [{"code": x["code"], "company_name": x["company_name"]} for x in raw]
-            except Exception as e:
-                status.update(label=f"抓取全台股清單失敗：{e}", state="error")
-                return False
-        elif sb.uploaded:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            tmp.write(sb.uploaded.getvalue())
-            tmp.close()
-            input_path = tmp.name
-        else:
+        cfg = build_cfg()
+        try:
+            status.update(label="讀取範圍內的股票清單 …")
+            items = scope_items(sb, cfg)
+        except Exception as e:
+            status.update(label=f"讀取股票清單失敗：{e}", state="error")
+            return False
+        if not items:
             status.update(label="請先在「找標的」上方的範圍上傳清單，或改選「全台股」", state="error")
             return False
 
-        cfg = build_cfg()
+        pool = current_pool()
+        sub, missing = split_by_pool(pool, items)
+        reused = len(items) - len(missing)
         buf = []
         handler = _ListHandler(buf)
         handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
@@ -67,7 +103,25 @@ def execute_scan(sb):
             log_box.caption("\n\n".join(buf[-4:]))
 
         try:
-            result = run_scan(input_path=input_path, cfg=cfg, progress_cb=on_progress, items=items)
+            if missing:
+                if reused:
+                    st.caption(f"範圍 {len(items)} 檔：{reused} 檔用今天已下載的資料，只下載 {len(missing)} 檔。")
+                part = run_scan(cfg=cfg, progress_cb=on_progress, items=missing)
+                pool = merge_pool(pool, part["scan_cache"])
+                save_pool(pool, now_tw().strftime("%H:%M"))
+                if reused:
+                    sub, _ = split_by_pool(pool, items)
+                    result = run_scan(cfg=cfg, cached=sub, progress_cb=on_progress)
+                else:
+                    result = part
+            else:
+                age = _pool_age_min()
+                if fresh_prices and (age is None or age > PRICE_STALE_MIN):
+                    status.update(label=f"更新 {len(sub['resolved'])} 檔現價（其他資料沿用今天已下載的）…")
+                    pool["price_map"] = {**pool.get("price_map", {}), **refresh_prices(sub, cfg)}
+                    save_pool(pool, now_tw().strftime("%H:%M"))
+                    sub, _ = split_by_pool(pool, items)
+                result = run_scan(cfg=cfg, cached=sub, progress_cb=on_progress)
         except Exception as e:
             status.update(label=f"掃描失敗：{e}", state="error")
             st.exception(e)
@@ -79,12 +133,17 @@ def execute_scan(sb):
         st.session_state["scan_cache"] = result.get("scan_cache")
         st.session_state["cfg"] = cfg
         st.session_state["_result_mode"] = st.session_state.get("strategy_mode", "breakout")
+        st.session_state["_result_scope"] = scope_key(sb)
+        st.session_state["_result_scope_label"] = scope_label(sb)
+        st.session_state["_result_reuse"] = {"total": len(items), "reused": reused, "downloaded": len(missing),
+                                             "data_at": (st.session_state.get("data_pool") or {}).get("at")}
         st.session_state["last_scan_at"] = now_tw().strftime("%m/%d %H:%M")
         _after_scan(result, sb.mode)
         n = len(result["df"]) if result.get("df") is not None else 0
-        status.update(label=f"掃描完成：{n} 檔，{result['elapsed_sec']:.0f} 秒",
+        how = f"，{reused} 檔用已下載的資料" if reused else ""
+        status.update(label=f"掃描完成：{n} 檔，{result['elapsed_sec']:.0f} 秒{how}",
                       state="complete", expanded=False)
-    st.toast(f"掃描完成：{n} 檔，{result['elapsed_sec']:.0f} 秒")
+    st.toast(f"掃描完成：{n} 檔{how}")
     return True
 
 

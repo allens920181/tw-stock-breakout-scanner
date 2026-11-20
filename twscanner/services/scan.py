@@ -291,3 +291,67 @@ def run_scan(input_path=None, cfg=None, progress_cb=None, items=None, cached=Non
     }
 
 
+
+
+# =====================================================================
+# 當日資料池：換範圍時只補抓缺的股票
+#   掃描會把下載到的原始資料（OHLC、股數、現價、財報日 + 全市場的籌碼/融資/營收/大盤）存成 scan_cache。
+#   把多次掃描的 scan_cache 合併成「資料池」；換範圍時先從池子切出子集，缺的才下載。
+#   例：先掃全台股，再換「僅普通股」或上傳自選清單 → 0 檔要下載，幾秒內重算完成。
+# =====================================================================
+_SYMBOL_MAPS = ("shares_map", "price_map", "earnings_map")         # 以 2330.TW 為 key
+_MARKET_DATA = ("chips_map", "margin_map", "revenue_map", "market_state")   # 全市場一份
+
+
+def _code(symbol):
+    return str(symbol).split(".")[0]
+
+
+def split_by_pool(pool, items):
+    """
+    items（[{code, company_name}]）對照資料池。
+    回 (子集 cache 或 None, 需要補抓的 items)。子集可直接傳給 run_scan(cached=...)。
+    池子裡查無資料（not_found）的代號不會再抓一次。
+    """
+    items = list(items)
+    if not pool:
+        return None, items
+    have = {_code(r["symbol"]): r for r in pool.get("resolved", [])}
+    nf = dict(pool.get("not_found", []))
+    missing = [it for it in items if it["code"] not in have and it["code"] not in nf]
+    resolved = [have[it["code"]] for it in items if it["code"] in have]
+    syms = {r["symbol"] for r in resolved}
+    sub = {k: pool.get(k) for k in _MARKET_DATA}
+    sub["items"] = items
+    sub["resolved"] = resolved
+    sub["not_found"] = [(it["code"], it["company_name"]) for it in items if it["code"] in nf]
+    for k in _SYMBOL_MAPS:
+        sub[k] = {s: v for s, v in (pool.get(k) or {}).items() if s in syms}
+    return sub, missing
+
+
+def merge_pool(pool, cache):
+    """把新掃描的 scan_cache 併入資料池（同代號以新資料為準；全市場資料用較新的一份）。"""
+    if not pool:
+        return {**cache, "resolved": list(cache.get("resolved", [])), "not_found": list(cache.get("not_found", []))}
+    resolved = {r["symbol"]: r for r in pool.get("resolved", [])}
+    resolved.update({r["symbol"]: r for r in cache.get("resolved", [])})
+    got = {_code(s) for s in resolved}
+    nf = dict(pool.get("not_found", []))
+    nf.update(dict(cache.get("not_found", [])))
+    items = {it["code"]: it for it in pool.get("items", [])}
+    items.update({it["code"]: it for it in cache.get("items", [])})
+    out = {"items": list(items.values()), "resolved": list(resolved.values()),
+           "not_found": [(c, n) for c, n in nf.items() if c not in got]}
+    for k in _SYMBOL_MAPS:
+        out[k] = {**(pool.get(k) or {}), **(cache.get(k) or {})}
+    for k in _MARKET_DATA:
+        out[k] = cache.get(k) if cache.get(k) is not None else pool.get(k)
+    return out
+
+
+def refresh_prices(cache, cfg):
+    """只重抓子集的即時現價（追高判斷用），回新的 price_map。價格歷史與其他資料不動。"""
+    syms = [r["symbol"] for r in cache.get("resolved", [])]
+    fresh = fetch_all_current_prices(syms, cfg["data"]["max_workers"]) if syms else {}
+    return {**(cache.get("price_map") or {}), **{s: v for s, v in fresh.items() if v is not None}}

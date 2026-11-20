@@ -9,10 +9,10 @@ from twscanner.core.tz import today_tw
 from twscanner.reporting.excel import write_excel
 from twscanner.services import run_adaptive_recommend
 from twscanner.services.today import CONDITION_KEYS, sort_by_core, trade_plan
-from twscanner.ui.actions import execute_scan, rescan_with_cache, sync_strategy_mode
-from twscanner.ui.components.blocks import asof, buy_form, conclusion, empty, kpi_row, plan_card
+from twscanner.ui.actions import execute_scan, pool_coverage, rescan_with_cache, sync_strategy_mode
+from twscanner.ui.components.blocks import asof, buy_form, callout, conclusion, empty, kpi_row, plan_card
 from twscanner.ui.format import clean_stock_col, colors
-from twscanner.ui.scan_controls import render_scan_controls
+from twscanner.ui.scan_controls import render_scan_controls, scope_key, scope_label
 from twscanner.ui.settings import build_cfg
 from twscanner.ui.state import get_base_config, persist_calibration_date
 
@@ -87,8 +87,9 @@ def _style(view):
 
 def _table(df):
     f1, f2, f3 = st.columns([1.6, 2.6, 1.4])
-    sig = f1.segmented_control("訊號", ["全部", "進場", "觀察"], default="全部", key="scan_sig")
-    group = f2.segmented_control("欄位", list(GROUPS) + ["全部欄位"], default="進場計畫", key="scan_grp")
+    sig = f1.segmented_control("訊號", ["全部", "進場", "觀察"], default="全部", key="scan_sig", required=True)
+    group = f2.segmented_control("欄位", list(GROUPS) + ["全部欄位"], default="進場計畫", key="scan_grp",
+                               required=True)
     kw = f3.text_input("搜尋", placeholder="代號或名稱", key="scan_kw", label_visibility="collapsed")
 
     d = df.copy()
@@ -230,10 +231,33 @@ def _calibration(result):
         st.error(f"自動校準失敗：{e}")
 
 
+def _scope_changed(sb):
+    """
+    範圍改了、但表格還是舊範圍的結果：
+    今天已經下載過這些股票 → 直接用資料池重算（不用按按鈕）；缺資料 → 告訴使用者按下去只要補抓幾檔。
+    """
+    if "result" not in st.session_state or st.session_state.get("_result_scope") in (None, scope_key(sb)):
+        return
+    cov = pool_coverage(sb)
+    if cov is None:
+        return
+    total, missing = cov
+    if missing == 0:
+        if execute_scan(sb, fresh_prices=False):
+            st.rerun()
+        return
+    old = st.session_state.get("_result_scope_label", "上一個範圍")
+    have = total - missing
+    callout(f"範圍改成「{scope_label(sb)}」，下面還是「{old}」的結果。按「開始掃描」："
+            + (f"{have} 檔用今天已下載的資料，只需下載 {missing} 檔。" if have else f"需要下載 {missing} 檔。"),
+            kind="info")
+
+
 def render():
     sb = render_scan_controls()
     if sb.run_btn and execute_scan(sb):
         st.rerun()
+    _scope_changed(sb)
     sync_strategy_mode(sb.mode_labels)
 
     if "result" not in st.session_state:
@@ -249,8 +273,11 @@ def render():
     conclusion(lead, sub, tone)
     s = result["summary"].iloc[0]
     mode_name = sb.mode_labels.get(st.session_state.get("_result_mode", "breakout"), "")
-    asof(f"資料截至 {st.session_state.get('last_scan_at', '')} · 策略：{mode_name} · "
-         f"掃描 {int(s.get('掃描股票數', 0))} 檔 · 耗時 {s.get('執行秒數', '—')} 秒")
+    reuse = st.session_state.get("_result_reuse") or {}
+    data_note = (f" · 沿用今天已下載的資料（現價更新於 {reuse['data_at']}）"
+                 if reuse.get("reused") and reuse.get("data_at") else "")
+    asof(f"範圍：{st.session_state.get('_result_scope_label', '—')} · 策略：{mode_name} · "
+         f"{int(s.get('掃描股票數', 0))} 檔 · 分析於 {st.session_state.get('last_scan_at', '')}{data_note}")
     kpi_row([
         ("達進場標準", f"{int(s.get('進場檔數', 0))}", "挑 1–2 檔"),
         ("觀察", f"{int(s.get('觀察檔數', 0))}", "條件差一點"),
