@@ -47,3 +47,25 @@ def test_sync_decisions():
     assert merge("journal", j1, j2) == j1 + [j2[1]]                # 日誌以（掃描日, 股票）去重
     t1, t2 = [{"賣出日": "d1", "損益": 1}], [{"賣出日": "d1", "損益": 1}, {"賣出日": "d2", "損益": 2}]
     assert merge("trades", t1, t2) == t1 + [t2[1]]                 # 交易紀錄以整筆內容去重
+
+
+def test_google_allowlist():
+    from twscanner.ui.auth import is_allowed
+    allowed = {"owner@example.com"}
+    assert is_allowed("Owner@Example.com ", allowed)          # 不分大小寫、去空白
+    assert not is_allowed("someone@example.com", allowed)
+    assert not is_allowed("owner@example.com", set())         # 沒設名單：一律不允許
+    assert not is_allowed(None, allowed)
+
+
+def test_google_login_decisions():
+    from twscanner.ui.auth import OWNER, decide_login
+    ok = {"owner@example.com"}
+    assert decide_login("owner@example.com", ok, None, None) == "login"            # 第一次進來
+    assert decide_login("owner@example.com", ok, OWNER, "google") == "none"        # 已在雲端空間
+    assert decide_login("owner@example.com", ok, OWNER, "password") == "none"      # 密碼登入中，不重複載入
+    assert decide_login("other@example.com", ok, None, None) == "deny"             # 不在名單
+    assert decide_login("other@example.com", ok, OWNER, "google") == "deny"
+    assert decide_login(None, ok, OWNER, "google") == "drop"                       # Google cookie 過期
+    assert decide_login(None, ok, OWNER, "password") == "none"                     # 密碼登入不受影響
+    assert decide_login(None, ok, None, None) == "none"

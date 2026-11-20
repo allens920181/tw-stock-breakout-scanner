@@ -118,6 +118,7 @@ strategy  market
 - `storage/cloud.py`：PostgreSQL（Neon）存取。一條連線加鎖共用、斷線自動重連一次；`kv_get_all` 一次讀回全部、`kv_versions` 只讀版本號、`kv_put(expect_at=)` 帶版本寫入（雲端已被別台改過就回 conflict，不覆蓋）。
 - `storage/sync.py`：判斷邏輯（純函式、有測試）：`decide()` 回 none / push / pull / conflict；`merge()` 合併交易紀錄與訊號日誌。
 - `ui/sync.py`：把 session 的持股、交易紀錄、訊號日誌、設定對應到雲端。`app.py` 每頁開頭 `pull_changes()`、結尾 `push_changes()`；登入時 `on_login()`；衝突在頁面最上方讓使用者選。
+- `ui/auth.py`：Google 登入（`st.login`，身分 cookie 約 30 天，記住裝置）＋密碼備援；`ALLOWED_EMAILS` 名單內的帳號對應同一個雲端空間（owner `me`）。判斷在純函式 `decide_login()`（有測試）。依賴 `streamlit[auth]` 與 `httpx`（Streamlit 1.58 的 auth extra 漏了 httpx）。
 - 個人資料只放 session 與登入後的雲端，**不寫伺服器檔案**（公開部署時是所有訪客共用的）。新增要同步的資料：在 `ui/sync.py` 的 `KEYS`、`snapshot()`、`apply()` 各加一段；新增要同步的設定：加進 `SETTING_KEYS`。
 
 ## 四、開發流程

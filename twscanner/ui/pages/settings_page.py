@@ -8,7 +8,7 @@ import streamlit as st
 
 from twscanner.storage import cloud as store
 from twscanner.storage.preferences import save_prefs
-from twscanner.ui import sync
+from twscanner.ui import auth, sync
 from twscanner.ui.glossary import HELP
 from twscanner.ui.state import cloud_passcode, get_base_config, seed
 
@@ -61,14 +61,42 @@ def _save():
         st.toast("已儲存" if res["local"] else "儲存失敗")
 
 
-def _login():
-    pc = cloud_passcode()
-    if pc and st.session_state.get("cloud_pw") == pc:
-        st.session_state["cloud_owner"] = "me"
-        st.session_state.pop("_cloud_loaded", None)
-        st.session_state.pop("cloud_pw", None)
-    else:
+def _md(text):
+    """email 裡的底線在 Markdown 會變斜體：跳脫掉。"""
+    return str(text or "").replace("_", "\\_").replace("*", "\\*")
+
+
+def _password_login():
+    if not auth.login_with_password(cloud_passcode(), st.session_state.get("cloud_pw")):
         st.session_state["_login_error"] = True
+    st.session_state.pop("cloud_pw", None)
+
+
+def _login_form():
+    google = auth.google_configured()
+    denied = st.session_state.get("_auth_denied")
+    if google:
+        if denied:
+            st.error(f"{_md(denied)} 不在允許名單裡，不能讀寫這個雲端空間。請改用允許的 Google 帳號。")
+            if st.button("換一個 Google 帳號"):
+                st.logout()
+        else:
+            if st.button("用 Google 登入", type="primary"):
+                auth.start_google_login()
+            st.caption("用 Google 登入後，這台裝置會記住約 30 天：重新整理、關掉再開都不用重新登入。")
+    if cloud_passcode():
+        box = st.expander("改用密碼登入", expanded=not google) if google else st.container()
+        with box:
+            c1, c2 = st.columns([2, 1], vertical_alignment="bottom")
+            c1.text_input("密碼", type="password", key="cloud_pw")
+            c2.button("登入", type="primary" if not google else "secondary", use_container_width=True,
+                      on_click=_password_login, key="pw_login")
+            if not google:
+                st.caption("密碼登入只在這個分頁有效；要記住這台裝置，請管理者設定 Google 登入（見 docs/雲端設定.md）。")
+    elif not google:
+        st.caption("伺服器還沒設定登入方式（APP_PASSCODE 或 Google 登入），見 docs/雲端設定.md。")
+    if st.session_state.pop("_login_error", False):
+        st.error("密碼錯誤，或伺服器沒有設定 APP_PASSCODE")
 
 
 def _cloud():
@@ -76,12 +104,11 @@ def _cloud():
         return
     _section("雲端帳號", "登入後，持股、交易紀錄、訊號日誌與所有設定都會自動同步，換裝置也看得到。")
     if not sync.owner():
-        c1, c2 = st.columns([2, 1], vertical_alignment="bottom")
-        c1.text_input("密碼", type="password", key="cloud_pw")
-        c2.button("登入", type="primary", use_container_width=True, on_click=_login)
-        if st.session_state.pop("_login_error", False):
-            st.error("密碼錯誤，或伺服器沒有設定 APP_PASSCODE")
+        _login_form()
         return
+    who = (f"已用 Google 登入：{_md(auth.google_email())}（這台裝置會記住）"
+           if st.session_state.get("auth_method") == "google" else "已用密碼登入（只在這個分頁有效）")
+    st.caption(who)
     text, state = sync.status()
     m = st.session_state.get("_sync", {})
     rows = "".join(
@@ -93,8 +120,10 @@ def _cloud():
         st.caption(f"錯誤：{m['error']}（多半是網路或 DATABASE_URL 設定；資料先留在這個分頁，連上後會自動補傳）")
     b1, b2, _ = st.columns([1, 1, 2])
     b1.button("立即檢查更新", use_container_width=True, on_click=sync.pull_changes, kwargs={"force": True})
-    b2.button("登出", use_container_width=True, on_click=sync.logout,
-              help="登出後，這個分頁裡的持股、交易紀錄與日誌會一起清掉（雲端的不受影響）。")
+    if b2.button("登出", use_container_width=True,
+                 help="登出後，這個分頁裡的持股、交易紀錄與日誌會一起清掉（雲端的不受影響）。"):
+        auth.sign_out()
+        st.rerun()
 
 
 def _count(key):
@@ -138,8 +167,8 @@ def _advanced(base_cfg):
 def render():
     base_cfg = get_base_config()
     st.markdown("<div class='page-title'>設定</div>", unsafe_allow_html=True)
+    _cloud()                 # 帳號放最上面：登入決定了下面的設定會不會跟著帳號走
     _money(base_cfg)
     _display()
     _save()
-    _cloud()
     _advanced(base_cfg)

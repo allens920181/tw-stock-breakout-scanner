@@ -11,7 +11,7 @@ from twscanner.market.us_regime import classify_us_market
 from twscanner.portfolio import trade_log
 from twscanner.storage import cloud as store
 from twscanner.storage.preferences import load_prefs, save_prefs
-from twscanner.ui import sync
+from twscanner.ui import auth, sync
 
 
 @st.cache_data
@@ -163,6 +163,7 @@ def bootstrap():
     from twscanner.ui.settings import apply_preset  # 避免循環 import
 
     store.configure(_secret("DATABASE_URL") or None)
+    auth.apply_login()               # Google 已登入（cookie 還在）→ 直接進雲端空間，不用再輸入密碼
     sync.on_login()
     _load_prefs_once()
     prefs = get_prefs()
