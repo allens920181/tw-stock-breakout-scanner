@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.scoring import analyze_stock
-
+from twscanner.strategy.scoring import analyze_stock
 
 CFG = {
     "filters": {

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from src.backtest import split_trades_is_oos, summarize_trades_is_oos
+from twscanner.research.backtest import split_trades_is_oos, summarize_trades_is_oos
 
 
 def _mk(n):

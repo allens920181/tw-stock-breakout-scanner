@@ -1,8 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.fetcher import fix_stock_code
-
+from twscanner.data.prices import fix_stock_code
 
 ETF_MAP = {
     "9805": "009805",

@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from src.holdings import analyze_holding
+from twscanner.portfolio.holdings import analyze_holding
 
 
 def _df(n=300, lo=60, hi=115):

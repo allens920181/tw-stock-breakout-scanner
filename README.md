@@ -1,18 +1,23 @@
-# 台股強勢突破交易清單（換手率版）
+# 台股波段決策系統
 
-掃描 `stock_list.xlsx` 中的股票，依加權評分 + 品質過濾輸出 Excel 報告。
+給台股波段散戶的每日決策助手：每天收盤後 10 分鐘，回答「今天能不能做、買哪幾檔、手上哪幾檔該賣」，並追蹤每月目標。
 
-## 特色
-- 自動判斷上市 (.TW) / 上櫃 (.TWO)
-- 批次下載 + 平行抓股數 + Parquet 本地快取
-- 加權評分（突破+量增、MA 多頭、換手率強勢、KD、MACD）
-- 品質前置過濾（最低股價、流動性、MA60 趨勢、停損距離）
-- **大盤狀態判斷**（^TWII regime）自動調整部位
-- **進場類型分類**：突破 / 拉回 / 區間突破
-- **部位管理**：固定風險法，自動計算建議買入張數
-- **持股管理**：上傳持股 Excel，輸出個股賣出建議（停損/+1R 半倉/+2R 出清/時間停損/移動停利）
-- **Walk-forward 回測**：勝率 / 平均 R / 期望值 / 最大回撤
-- 全參數由 `config.yaml` 控制
+## 八個頁面
+
+| 分頁 | 回答的問題 |
+|---|---|
+| **今日決策**（首頁） | 今天能不能開新倉？持股要怎麼處理？候選股的完整交易計畫？本月目標進度？ |
+| **找標的** | 哪幾檔值得買？（強勢突破 / 早期突破 / 潛伏起漲前三種策略，點一列看入選理由與交易計畫） |
+| **個股健檢** | 這檔能不能買、該不該賣？財報與月營收的白話健檢、K 線 |
+| **持股與紀錄** | 手上的該不該賣？賣出後記錄，自動扣手續費與證交稅，統計每月損益與勝率 |
+| **資金流向** | 美國資金輪動、三大法人、類股成交比重、台美連動 |
+| **學習中心** | 交易哲學、財報、營運、股票、總經、名詞表，附月目標與部位計算機 |
+| **策略驗證** | 這套策略可信嗎？大樣本實證（核心指標、10 年大盤基準）、回測、自動校準、實戰績效 |
+| **設定** | 資金與月目標、漲跌顏色、雲端帳號、進階選股條件 |
+
+**核心指標：距一年高點**（收盤 ÷ 過去一年最高價）。10 年、1,033 檔上市股比較 8 個常見指標後選出：大盤非空頭時，收盤 ≥ 一年高點 90% 的股票，之後 1 個月平均 +1.61%（扣成本），全部可交易股 +0.51%，每一年都跑贏平均；大盤空頭時沒有優勢。找標的、今日決策都依它排序，個股健檢直接顯示。研究方法與限制見「策略驗證 → 大樣本實證」與 [`scripts/strategy_study/`](scripts/strategy_study/)。
+
+設計原則：風險先於報酬、流程勝過預測、承認不確定。月目標只用來推算要做幾筆與控制風險（每月虧損上限、空頭不開新倉），不用來放大部位。
 
 ## 安裝
 
@@ -55,52 +60,52 @@ uv run python main.py --backtest --universe twse --min-score 6
 由 [TWSE OpenAPI](https://openapi.twse.com.tw) 抓當日所有上市證券，自動過濾 TDR/特別股/受益證券。
 首次約 **5~15 分鐘**（含批次下載 + 抓股數），同日重跑 **<1 分鐘**（讀本地 Parquet 快取）。
 
-GUI 端在側欄選「掃描全台股」即可。
+App 裡在「找標的」頁上方的「範圍」選「全台股」即可。
 
 報告輸出檔名格式：`台股全部分析報告_自動判斷市場_YYYYMMDD_HHMMSS.xlsx`
 
-## 測試
+## 開發
 
 ```bash
-uv run pytest
+uv sync                      # 安裝（含 pytest、ruff）
+uv run pytest                # 測試（含分層架構規則）
+uv run ruff check . --fix    # lint + import 排序
 ```
+
+CI 會在 push 到 `main` 及每個 PR 自動跑 lint 與測試。
 
 ## 專案結構
 
 ```
-.
-├── app.py               # Streamlit GUI
-├── main.py              # CLI 入口
-├── config.yaml          # 策略 / 資料 / 輸出參數
-├── src/
-│   ├── config.py        # 讀 yaml
-│   ├── cache.py         # 本地 Parquet 快取
-│   ├── fetcher.py       # yfinance 批次下載 + 平行抓股數
-│   ├── indicators.py    # MA / KD / MACD
-│   ├── scoring.py       # 過濾 + 加權評分
-│   ├── report.py        # Excel 輸出
-│   └── runner.py        # 共用掃描流程（GUI/CLI）
-└── tests/
-    ├── test_fix_code.py
-    ├── test_indicators.py
-    └── test_scoring.py
+app.py          Streamlit 入口      main.py      CLI 入口      config.yaml   全部參數
+twscanner/
+├── core/       設定、快取、時區
+├── data/       外部資料來源（價格、法人、融資、營收、財報、產業）
+├── analysis/   純計算（指標、進場分類、部位、統計）
+├── strategy/   選股策略（突破評分、潛伏、族群）
+├── market/     大盤 / 美股 / 大資金 / 資金流向
+├── portfolio/  持股出場建議、訊號日誌
+├── research/   回測、因子驗證、敏感度、自適應
+├── storage/    雲端、歷史、偏好
+├── reporting/  Excel、K 線圖
+├── services/   掃描 / 查詢 / 持股 / 研究流程（GUI 與 CLI 共用）
+├── ui/         Streamlit：外殼（頂部導覽）、掃描列、元件、pages/ 各頁
+└── cli.py
+tests/          單元測試 + test_architecture.py（分層守門）
+docs/           架構、部署、雲端設定、判讀指南
 ```
 
-## 加權評分（總分 8）
+分層規則、各層職責、以及「新增資料源 / 策略 / 分頁」的步驟見 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
 
-| 條件 | 權重 | 說明 |
-| --- | --- | --- |
-| 突破+量增 | 2 | Close > 20 日高 **且** Volume > 20 日均量 × 1.2 |
-| MA 多頭 | 2 | MA5>MA20>MA60 **且** Close>MA20 |
-| 換手率強勢 | 2 | 換手率 > 1% **且** > 20 日平均換手率 |
-| KD 強勢 | 1 | K > D **且** K > 70 |
-| MACD 多方 | 1 | OSC > 0 |
+## 評分與過濾參數
 
-預設門檻：≥6 強勢候選、≥5 觀察、≥4 偏弱觀察。
+評分權重、進場/觀察門檻、品質過濾、風格 Preset、交易成本等**全部以 [`config.yaml`](config.yaml) 為準**，
+可在「設定」頁的「進階：選股條件」微調。各指標的意義與判讀方式見 [docs/判讀指南.md](docs/判讀指南.md)。
 
-## 品質前置過濾（預設值，於 `config.yaml` 調整）
+## 文件
 
-- `min_price: 10` — 股價過低直接排除
-- `min_avg_volume: 500000` — 20 日均量 < 500 張排除
-- `require_above_ma60: true` — 必須站上 MA60
-- `min_risk_pct: 0.02` — 停損距離 < 2% 視為訊號降級
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 工程架構與開發指南
+- [docs/DESIGN.md](docs/DESIGN.md) — 設計規範：顏色、數字格式、版面元件、驗收清單
+- [docs/DEPLOY.md](docs/DEPLOY.md) — 部署到 Streamlit Community Cloud
+- [docs/雲端設定.md](docs/雲端設定.md) — Neon 雲端會員空間（持股、交易紀錄、日誌、設定自動同步）
+- [docs/判讀指南.md](docs/判讀指南.md) — 系統說明與判讀指南

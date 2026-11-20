@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from src.backtest import _regime_at, summarize_by_regime
-from src.market import build_regime_map
+from twscanner.market.tw_regime import build_regime_map
+from twscanner.research.backtest import _regime_at, summarize_by_regime
 
 
 def test_build_regime_map_synthetic(monkeypatch):
@@ -14,7 +14,7 @@ def test_build_regime_map_synthetic(monkeypatch):
         "Open": close, "High": close + 1, "Low": close - 1,
         "Close": close, "Volume": np.full(n, 1e8),
     }, index=pd.date_range("2024-01-01", periods=n, freq="B"))
-    monkeypatch.setattr("src.market.fetch_twii", lambda period, cache_dir: df)
+    monkeypatch.setattr("twscanner.market.tw_regime.fetch_twii", lambda period, cache_dir: df)
     rm = build_regime_map("1y", ".cache")
     assert isinstance(rm, pd.Series)
     assert set(rm.unique()) <= {"bull", "neutral", "bear"}

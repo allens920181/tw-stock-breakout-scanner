@@ -1,8 +1,17 @@
 [theme]
-primaryColor = "#4F46E5"
-backgroundColor = "#F8FAFC"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#0F172A"
+# 中性墨黑 + 白底 + 淺灰填色；不用框線區隔元件（見 docs/DESIGN.md）
+primaryColor = "#18181B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F4F5"
+textColor = "#18181B"
+borderColor = "#E4E4E7"
+dataframeBorderColor = "#EFEFF1"
+dataframeHeaderBackgroundColor = "#FAFAFA"
+showWidgetBorder = false
+showSidebarBorder = false
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
+linkColor = "#2563EB"
 font = "sans serif"
 
 [server]
@@ -11,3 +20,6 @@ headless = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"   # 隱藏 Deploy 等開發者按鈕

@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from src.backtest import backtest_symbol
-from src.sensitivity import detect_plateau, plateau_scan
+from twscanner.research.backtest import backtest_symbol
+from twscanner.research.sensitivity import detect_plateau
 
 WEIGHTS = {"breakout_with_volume": 2, "ma_bullish": 2, "kd": 1, "macd": 1}
 

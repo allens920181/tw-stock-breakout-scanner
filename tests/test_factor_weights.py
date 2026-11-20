@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from src.factor_eval import factor_correlation, suggest_weights_from_lift
+from twscanner.research.factor_eval import factor_correlation, suggest_weights_from_lift
 
 CFG = {"scoring": {"weights": {
     "breakout_with_volume": 2, "ma_bullish": 2, "turnover_strong": 2,

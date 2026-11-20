@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.indicators import add_indicators
+from twscanner.analysis.indicators import add_indicators
 
 
 def _make_df(n=120, seed=0):

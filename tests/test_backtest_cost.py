@@ -2,8 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from src.backtest import _apply_costs, _cost_round_trip_rate, backtest_symbol
-from src.indicators import add_indicators
+from twscanner.research.backtest import _apply_costs, _cost_round_trip_rate, backtest_symbol
 
 
 def _trending_df(n=160):

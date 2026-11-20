@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.ambush import analyze_ambush
-from src.scoring import analyze_stock
+from twscanner.strategy.ambush import analyze_ambush
+from twscanner.strategy.scoring import analyze_stock
 
 CFG = yaml.safe_load(open("config.yaml", encoding="utf-8"))
 

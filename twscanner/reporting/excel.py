@@ -1,0 +1,68 @@
+"""Excel 報告：掃描結果彙整成 DataFrame / 摘要，以及掃描與回測報告輸出。"""
+import os
+
+import pandas as pd
+
+from twscanner.core.tz import now_tw
+
+
+def build_dataframes(results, failed_list, stock_count, elapsed_sec):
+    df = pd.DataFrame(results)
+    for col in ["評分", "換手率%", "RR比"]:
+        if col not in df.columns:
+            df[col] = None
+
+    # 潛伏模式優先用「啟動就緒度」排序（最接近發動的在前）
+    if "啟動就緒度" in df.columns:
+        sort_by = ["啟動就緒度", "評分", "RR比"]
+    else:
+        sort_by = ["評分", "換手率%", "RR比"]
+    df = df.sort_values(
+        by=sort_by,
+        ascending=[False] * len(sort_by),
+        na_position="last",
+    )
+
+    def _count(label):
+        if "訊號判斷" not in df.columns:
+            return 0
+        return int((df["訊號判斷"] == label).sum())
+
+    summary = pd.DataFrame([{
+        "掃描股票數": stock_count,
+        "成功分析檔數": int((df.get("狀態", pd.Series(dtype=str)).str.startswith("成功", na=False)).sum()),
+        "進場檔數": _count("進場"),
+        "觀察檔數": _count("觀察"),
+        "不操作檔數": _count("不操作"),
+        "執行秒數": round(elapsed_sec, 1),
+        "策略條件": "突破+量增 / MA多頭 / 換手率強勢 / KD / MACD（加權）",
+        "說明": "v0.4 三級訊號（進場/觀察/不操作）+ Preset",
+    }])
+
+    failed_df = pd.DataFrame(failed_list)
+    return df, summary, failed_df
+
+
+def write_excel(df, summary, failed_df, output_dir, prefix):
+    os.makedirs(output_dir, exist_ok=True)
+    now = now_tw().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(output_dir, f"{prefix}_{now}.xlsx")
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="全部分析結果", index=False)
+        summary.to_excel(writer, sheet_name="Report摘要", index=False)
+        if failed_df is not None and len(failed_df) > 0:
+            failed_df.to_excel(writer, sheet_name="錯誤清單", index=False)
+    return path
+
+
+def write_backtest_excel(bt, output_dir):
+    """回測結果（summary / trades / by_symbol）→ 回測報告_YYYYMMDD_HHMMSS.xlsx，回傳路徑。"""
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"回測報告_{now_tw().strftime('%Y%m%d_%H%M%S')}.xlsx")
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame([bt["summary"]]).to_excel(writer, sheet_name="摘要", index=False)
+        if len(bt["trades"]):
+            bt["trades"].to_excel(writer, sheet_name="交易明細", index=False)
+        if len(bt["by_symbol"]):
+            bt["by_symbol"].to_excel(writer, sheet_name="個股統計", index=False)
+    return path
