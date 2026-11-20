@@ -8,10 +8,10 @@ from twscanner.core.tz import today_tw
 from twscanner.data.universe import fetch_twse_universe
 from twscanner.market.tw_regime import classify_market
 from twscanner.market.us_regime import classify_us_market
-from twscanner.portfolio import journal, trade_log
+from twscanner.portfolio import trade_log
 from twscanner.storage import cloud as store
-from twscanner.storage import trades as trades_store
 from twscanner.storage.preferences import load_prefs, save_prefs
+from twscanner.ui import sync
 
 
 @st.cache_data
@@ -96,9 +96,9 @@ def persist_calibration_date():
     d = today_tw().isoformat()
     st.session_state["last_calibrated_date"] = d
     try:
-        _p = load_prefs(cloud_owner())
+        _p = load_prefs(None)
         _p["last_calibrated_date"] = d
-        save_prefs(_p, cloud_owner())
+        save_prefs(_p, None)          # 本機；登入時由雲端同步帶走（ui/sync.py 的 SETTING_KEYS）
     except Exception:
         pass
 
@@ -119,43 +119,13 @@ def cloud_passcode():
 
 def get_prefs():
     """本 session 載入的使用者偏好（bootstrap 後可用）。"""
-    return st.session_state.get("_prefs") or load_prefs(cloud_owner())
-
-
-def _load_cloud_once():
-    """登入後一次性從雲端載入持股 / 訊號日誌。"""
-    owner = cloud_owner()
-    if not owner or st.session_state.get("_cloud_loaded"):
-        return
-    try:
-        cdf = store.load_holdings(owner)
-        if cdf is not None and len(cdf):
-            st.session_state["holdings_df"] = cdf
-            st.session_state["_hold_sig"] = cdf.to_json()
-    except Exception:
-        pass
-    try:
-        cj = store.load_journal(owner)
-        if cj is not None:
-            journal.save_journal(cj)          # 還原雲端日誌到本機工作檔
-    except Exception:
-        pass
-    try:
-        # 個人財務數字只存在雲端：登入後套用
-        remote = store.load_prefs(owner) or {}
-        for k in ("total_capital", "month_target", "loss_limit_r"):
-            if k in remote:
-                st.session_state[k] = remote[k]
-        st.session_state["_prefs"] = {**st.session_state.get("_prefs", {}), **remote}
-    except Exception:
-        pass
-    st.session_state["_cloud_loaded"] = True
+    return st.session_state.get("_prefs") or load_prefs(None)
 
 
 def _load_prefs_once():
     if "_prefs_loaded" in st.session_state:
         return
-    prefs = load_prefs(cloud_owner())
+    prefs = load_prefs(None)          # 本機一般設定；登入後的雲端設定由 ui/sync.py 套用
     st.session_state["_prefs"] = prefs
     st.session_state["_prefs_loaded"] = True
     # 跨重啟保留「上次校準日期」以維持頻率提醒
@@ -193,7 +163,7 @@ def bootstrap():
     from twscanner.ui.settings import apply_preset  # 避免循環 import
 
     store.configure(_secret("DATABASE_URL") or None)
-    _load_cloud_once()
+    sync.on_login()
     _load_prefs_once()
     prefs = get_prefs()
     if "preset" not in st.session_state:
@@ -219,16 +189,13 @@ def add_holding(code, name, cost, shares):
                          "持有股數": int(shares)}])
     st.session_state["holdings_df"] = pd.concat([df, row], ignore_index=True)
     st.session_state["holdings_editor_version"] = st.session_state.get("holdings_editor_version", 0) + 1
-    owner = cloud_owner()
-    if owner and store.is_enabled():
-        store.save_holdings(owner, st.session_state["holdings_df"])
+    st.session_state.pop("_holdings_edited", None)      # 登入時由雲端同步自動上傳
 
 
 def get_trades_df():
-    """已實現交易紀錄（原始欄位）。第一次讀取時從本機 / 雲端載入。"""
+    """已實現交易紀錄（原始欄位）。只存在這個 session；登入時由雲端同步載入與上傳。"""
     if "trades_df" not in st.session_state:
-        recs = trades_store.load_records(cloud_owner())
-        df = pd.DataFrame(recs) if recs else trade_log.empty()
+        df = trade_log.empty()
         for c in trade_log.COLUMNS:
             if c not in df.columns:
                 df[c] = None
@@ -237,10 +204,19 @@ def get_trades_df():
 
 
 def save_trades_df(df):
-    df = df[[c for c in trade_log.COLUMNS if c in df.columns]].copy()
-    st.session_state["trades_df"] = df
-    recs = df.where(pd.notna(df), None).to_dict("records")
-    return trades_store.save_records(recs, cloud_owner())
+    """寫回 session；回傳是否會保存到雲端（有登入才會，由同步在本次執行結尾上傳）。"""
+    st.session_state["trades_df"] = df[[c for c in trade_log.COLUMNS if c in df.columns]].copy()
+    return bool(cloud_owner())
+
+
+def get_journal():
+    """訊號日誌（只在 session 與登入後的雲端；不寫伺服器檔案，公開部署時才不會被別人看到）。"""
+    return st.session_state.setdefault("journal", [])
+
+
+def set_journal(records):
+    st.session_state["journal"] = list(records or [])
+    st.session_state.pop("journal_eval", None)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)

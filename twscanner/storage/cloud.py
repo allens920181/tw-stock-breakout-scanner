@@ -10,6 +10,7 @@
 """
 import json
 import logging
+import threading
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +30,13 @@ CREATE TABLE IF NOT EXISTS tw_kv (
 
 
 def configure(dsn):
-    """由 App 啟動時帶入 Neon 連線字串（取自 st.secrets）。None/空 → 停用雲端。"""
-    global _DSN, _SCHEMA_READY
-    _DSN = (dsn or "").strip() or None
+    """由 App 啟動時帶入 Neon 連線字串（取自 st.secrets）。None/空 → 停用雲端。同一字串重複呼叫不會斷線。"""
+    global _DSN, _SCHEMA_READY, _CONN
+    dsn = (dsn or "").strip() or None
+    if dsn == _DSN:
+        return
+    _close()
+    _DSN = dsn
     _SCHEMA_READY = False
 
 
@@ -51,15 +56,60 @@ def _connect():
 
     import pg8000.dbapi
     u = urlparse(_DSN)
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    kw = {}
+    if u.hostname not in ("localhost", "127.0.0.1"):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kw["ssl_context"] = ctx
     return pg8000.dbapi.connect(
         user=u.username, password=u.password,
         host=u.hostname, port=u.port or 5432,
-        database=(u.path or "/").lstrip("/"),
-        ssl_context=ctx, timeout=15,
+        database=(u.path or "/").lstrip("/"), timeout=15, **kw,
     )
+
+
+# ---- 共用連線：每次讀寫都重新連線很慢（Neon 冷啟動 1–3 秒）。一條連線加鎖共用，斷了就重連一次 ----
+_CONN = None
+_LOCK = threading.RLock()
+
+
+def _close():
+    global _CONN
+    try:
+        if _CONN is not None:
+            _CONN.close()
+    except Exception:
+        pass
+    _CONN = None
+
+
+def _run(fn):
+    """在共用連線上執行 fn(cursor)；失敗（多半是閒置被斷線）就重連重試一次。"""
+    global _CONN, _SCHEMA_READY
+    with _LOCK:
+        for attempt in (1, 2):
+            try:
+                if _CONN is None:
+                    _CONN = _connect()
+                cur = _CONN.cursor()
+                if not _SCHEMA_READY:
+                    cur.execute(_CREATE_SQL)
+                    _SCHEMA_READY = True
+                out = fn(cur)
+                _CONN.commit()
+                return out
+            except ImportError:
+                raise
+            except Exception:
+                try:
+                    _CONN.rollback()
+                except Exception:
+                    pass
+                _close()
+                _SCHEMA_READY = False
+                if attempt == 2:
+                    raise
 
 
 def _coerce(val):
@@ -72,92 +122,111 @@ def _coerce(val):
     return val
 
 
+def _ts(v):
+    """timestamptz → ISO 字串（當作版本號比對，精確到微秒）。"""
+    return v.isoformat() if hasattr(v, "isoformat") else (str(v) if v is not None else None)
+
+
 def ping():
     """測試連線：回 (ok: bool, msg: str)。給 UI 顯示『到底連上沒』。"""
     global last_error
     if not _DSN:
         return False, "未設定 DATABASE_URL"
     try:
-        conn = _connect()
+        _run(lambda cur: (cur.execute("SELECT 1"), cur.fetchone()))
+        last_error = None
+        return True, "連線正常"
     except ImportError:
         last_error = "未安裝資料庫驅動（psycopg2 / pg8000）"
         return False, last_error
     except Exception as e:
         last_error = str(e)
         return False, str(e)
-    try:
-        cur = conn.cursor()
-        cur.execute(_CREATE_SQL)
-        cur.execute("SELECT 1")
-        cur.fetchone()
-        conn.commit()
-        last_error = None
-        return True, "連線正常，資料表就緒"
-    except Exception as e:
-        last_error = str(e)
-        return False, str(e)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
-def kv_get(owner, key, default=None):
+def kv_get_all(owner):
+    """一次讀回這個人的全部資料：{key: {"value": ..., "at": 版本}}；失敗回 None（不是空 dict）。"""
     global last_error
     if not _DSN:
-        return default
-    conn = None
+        return None
+
+    def q(cur):
+        cur.execute("SELECT key, value, updated_at FROM tw_kv WHERE owner=%s", (owner,))
+        return {k: {"value": _coerce(v), "at": _ts(t)} for k, v, t in cur.fetchall()}
     try:
-        conn = _connect()
-        cur = conn.cursor()
-        cur.execute(_CREATE_SQL)
-        cur.execute("SELECT value FROM tw_kv WHERE owner=%s AND key=%s", (owner, key))
-        row = cur.fetchone()
-        conn.commit()
-        return _coerce(row[0]) if row else default
+        out = _run(q)
+        last_error = None
+        return out
     except Exception as e:
         last_error = str(e)
-        log.warning("雲端讀取失敗（%s/%s）：%s", owner, key, e)
-        return default
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+        log.warning("雲端讀取失敗（%s）：%s", owner, e)
+        return None
 
 
-def kv_set(owner, key, value):
+def kv_versions(owner):
+    """只讀版本（不帶內容，很輕）：{key: at}；用來偵測別台裝置是否改過。失敗回 None。"""
+    global last_error
+    if not _DSN:
+        return None
+
+    def q(cur):
+        cur.execute("SELECT key, updated_at FROM tw_kv WHERE owner=%s", (owner,))
+        return {k: _ts(t) for k, t in cur.fetchall()}
+    try:
+        return _run(q)
+    except Exception as e:
+        last_error = str(e)
+        return None
+
+
+def kv_put(owner, key, value, expect_at=None, force=False):
+    """
+    寫入並回 {"ok", "at", "conflict", "remote"}。
+    expect_at：上次讀到的版本。雲端版本已經不同（別台裝置改過）就不覆蓋，回 conflict=True 與雲端內容。
+    force=True 直接覆蓋（使用者選「用這台的版本」時）。
+    """
     global last_error
     if not _DSN:
         last_error = "未設定 DATABASE_URL"
-        return False
-    conn = None
+        return {"ok": False, "at": None, "conflict": False, "remote": None}
+    payload = json.dumps(value, ensure_ascii=False, default=str)
+
+    def q(cur):
+        if not force and expect_at is not None:
+            cur.execute("UPDATE tw_kv SET value=%s::jsonb, updated_at=clock_timestamp() "
+                        "WHERE owner=%s AND key=%s AND updated_at=%s::timestamptz RETURNING updated_at",
+                        (payload, owner, key, expect_at))
+            row = cur.fetchone()
+            if row:
+                return {"ok": True, "at": _ts(row[0]), "conflict": False, "remote": None}
+        if not force:
+            cur.execute("SELECT value, updated_at FROM tw_kv WHERE owner=%s AND key=%s", (owner, key))
+            row = cur.fetchone()
+            if row:   # 雲端已有、而且版本不是我們讀到的那個 → 衝突
+                return {"ok": False, "at": _ts(row[1]), "conflict": True, "remote": _coerce(row[0])}
+        cur.execute("INSERT INTO tw_kv (owner, key, value) VALUES (%s, %s, %s::jsonb) "
+                    "ON CONFLICT (owner, key) DO UPDATE SET value=EXCLUDED.value, updated_at=clock_timestamp() "
+                    "RETURNING updated_at", (owner, key, payload))
+        return {"ok": True, "at": _ts(cur.fetchone()[0]), "conflict": False, "remote": None}
     try:
-        payload = json.dumps(value, ensure_ascii=False, default=str)
-        conn = _connect()
-        cur = conn.cursor()
-        cur.execute(_CREATE_SQL)
-        cur.execute(
-            "INSERT INTO tw_kv (owner, key, value) VALUES (%s, %s, %s::jsonb) "
-            "ON CONFLICT (owner, key) DO UPDATE SET value=EXCLUDED.value, "
-            "updated_at=now()",
-            (owner, key, payload),
-        )
-        conn.commit()
+        out = _run(q)
         last_error = None
-        return True
+        return out
     except Exception as e:
         last_error = str(e)
         log.warning("雲端寫入失敗（%s/%s）：%s", owner, key, e)
-        return False
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+        return {"ok": False, "at": None, "conflict": False, "remote": None}
+
+
+def kv_get(owner, key, default=None):
+    rows = kv_get_all(owner)
+    if not rows or key not in rows:
+        return default
+    return rows[key]["value"]
+
+
+def kv_set(owner, key, value):
+    return kv_put(owner, key, value, force=True)["ok"]
 
 
 # ========== 持股（DataFrame <-> records）==========

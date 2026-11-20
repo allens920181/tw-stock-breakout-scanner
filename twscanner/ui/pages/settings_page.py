@@ -8,8 +8,9 @@ import streamlit as st
 
 from twscanner.storage import cloud as store
 from twscanner.storage.preferences import save_prefs
+from twscanner.ui import sync
 from twscanner.ui.glossary import HELP
-from twscanner.ui.state import cloud_owner, cloud_passcode, get_base_config, seed
+from twscanner.ui.state import cloud_passcode, get_base_config, seed
 
 
 def _section(title, desc):
@@ -49,72 +50,58 @@ def _display():
 
 
 def _save():
-    st.caption("風格與漲跌顏色存在這台裝置；總資金、月目標等財務數字只在登入雲端後保存"
+    if sync.owner():
+        st.caption("已登入雲端：設定改了就會自動同步，換裝置登入也一樣。")
+        return
+    st.caption("沒有登入雲端：風格與漲跌顏色可以存在這台伺服器；總資金、月目標等財務數字只在登入雲端後保存"
                "（公開部署時，伺服器上的檔案是所有訪客共用的）。")
-    if st.button("儲存設定", type="primary"):
-        res = save_prefs({
-            "preset": st.session_state.get("preset", "balanced"),
-            "total_capital": int(st.session_state.get("total_capital", 1_000_000)),
-            "month_target": int(st.session_state.get("month_target", 10_000)),
-            "loss_limit_r": float(st.session_state.get("loss_limit_r", 2.0)),
-            "color_mode": st.session_state.get("color_mode", "tw"),
-            "onboarded": True,
-        }, cloud_owner())
-        if res["cloud"]:
-            st.toast("已儲存（含財務數字，存在你的雲端空間）")
-        elif res["local"]:
-            st.toast("已儲存風格與漲跌顏色；財務數字需登入雲端才會保存")
-        else:
-            st.error("儲存失敗")
+    if st.button("儲存風格與顏色"):
+        res = save_prefs({"preset": st.session_state.get("preset", "balanced"),
+                          "color_mode": st.session_state.get("color_mode", "tw"), "onboarded": True}, None)
+        st.toast("已儲存" if res["local"] else "儲存失敗")
+
+
+def _login():
+    pc = cloud_passcode()
+    if pc and st.session_state.get("cloud_pw") == pc:
+        st.session_state["cloud_owner"] = "me"
+        st.session_state.pop("_cloud_loaded", None)
+        st.session_state.pop("cloud_pw", None)
+    else:
+        st.session_state["_login_error"] = True
 
 
 def _cloud():
     if not store.is_enabled():
         return
-    _section("雲端帳號", "登入後，持股、交易紀錄與財務設定會永久保存，換裝置也看得到。")
-    owner = st.session_state.get("cloud_owner")
-    if not owner:
+    _section("雲端帳號", "登入後，持股、交易紀錄、訊號日誌與所有設定都會自動同步，換裝置也看得到。")
+    if not sync.owner():
         c1, c2 = st.columns([2, 1], vertical_alignment="bottom")
-        pw = c1.text_input("密碼", type="password", key="cloud_pw")
-        if c2.button("登入", type="primary", use_container_width=True):
-            pc = cloud_passcode()
-            if pc and pw == pc:
-                st.session_state["cloud_owner"] = "me"
-                st.session_state.pop("_cloud_loaded", None)
-                st.rerun()
-            else:
-                st.error("密碼錯誤，或伺服器沒有設定 APP_PASSCODE")
+        c1.text_input("密碼", type="password", key="cloud_pw")
+        c2.button("登入", type="primary", use_container_width=True, on_click=_login)
+        if st.session_state.pop("_login_error", False):
+            st.error("密碼錯誤，或伺服器沒有設定 APP_PASSCODE")
         return
-    ok, msg = store.ping()
-    if ok:
-        try:
-            n = len(store.load_holdings(owner) or [])
-        except Exception:
-            n = 0
-        st.markdown(f"已登入 · 雲端持股 {n} 筆")
-    else:
-        st.error(f"雲端連線失敗：{msg}（多半是 DATABASE_URL 有誤；持股先暫存在這台裝置）")
-    b1, b2, b3 = st.columns(3)
-    if b1.button("存到雲端", use_container_width=True):
-        df = st.session_state.get("holdings_df")
-        if store.save_holdings(owner, df):
-            st.session_state["_hold_sig"] = df.to_json() if df is not None else ""
-            st.toast("已存到雲端")
-        else:
-            st.error(f"存雲端失敗：{store.last_error}")
-    if b2.button("從雲端載入", use_container_width=True):
-        cd = store.load_holdings(owner)
-        if cd is not None:
-            st.session_state["holdings_df"] = cd
-            st.session_state["_hold_sig"] = cd.to_json()
-            st.toast(f"已載入 {len(cd)} 筆")
-            st.rerun()
-        else:
-            st.info("雲端還沒有持股資料")
-    if b3.button("登出", use_container_width=True):
-        for k in ("cloud_owner", "_cloud_loaded", "_hold_sig"):
-            st.session_state.pop(k, None)
-        st.rerun()
+    text, state = sync.status()
+    m = st.session_state.get("_sync", {})
+    rows = "".join(
+        f"<div class='rowline'><div class='main'><div class='t'>{label}</div></div>"
+        f"<div class='v'>{_count(key)}</div></div>" for key, label in sync.LABELS.items())
+    st.markdown(f"<div class='sync-state {state}'><i class='dot {state}'></i>{text}</div>{rows}",
+                unsafe_allow_html=True)
+    if m.get("error"):
+        st.caption(f"錯誤：{m['error']}（多半是網路或 DATABASE_URL 設定；資料先留在這個分頁，連上後會自動補傳）")
+    b1, b2, _ = st.columns([1, 1, 2])
+    b1.button("立即檢查更新", use_container_width=True, on_click=sync.pull_changes, kwargs={"force": True})
+    b2.button("登出", use_container_width=True, on_click=sync.logout,
+              help="登出後，這個分頁裡的持股、交易紀錄與日誌會一起清掉（雲端的不受影響）。")
+
+
+def _count(key):
+    v = sync.snapshot(key)
+    if key == "prefs":
+        return f"{len(v)} 項" if v else "—"
+    return f"{len(v)} 筆" if v else "0 筆"
 
 
 def _advanced(base_cfg):

@@ -107,5 +107,5 @@ docs/           架構、部署、雲端設定、判讀指南
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 工程架構與開發指南
 - [docs/DESIGN.md](docs/DESIGN.md) — 設計規範：顏色、數字格式、版面元件、驗收清單
 - [docs/DEPLOY.md](docs/DEPLOY.md) — 部署到 Streamlit Community Cloud
-- [docs/雲端設定.md](docs/雲端設定.md) — Neon 雲端會員空間（持股 / 日誌永久保存）
+- [docs/雲端設定.md](docs/雲端設定.md) — Neon 雲端會員空間（持股、交易紀錄、日誌、設定自動同步）
 - [docs/判讀指南.md](docs/判讀指南.md) — 系統說明與判讀指南

@@ -10,7 +10,6 @@ from twscanner.core.tz import today_tw
 from twscanner.data.names import lookup_names
 from twscanner.data.prices import fix_stock_code
 from twscanner.portfolio import trade_log
-from twscanner.storage import cloud as store
 from twscanner.ui.actions import analyze_holdings
 from twscanner.ui.components.blocks import asof, conclusion, empty, kpi_row, signed_value
 from twscanner.ui.components.common import make_holdings_template
@@ -224,14 +223,7 @@ def _editor(etf_map):
             st.rerun(scope="fragment")
     frag()
     edited = st.session_state.get("_holdings_edited", st.session_state["holdings_df"])
-    st.session_state["holdings_df"] = edited
-    if cloud_owner():
-        try:
-            sig = edited.to_json()
-            if st.session_state.get("_hold_sig") != sig and store.save_holdings(cloud_owner(), edited):
-                st.session_state["_hold_sig"] = sig
-        except Exception:
-            pass
+    st.session_state["holdings_df"] = edited     # 登入時由雲端同步在本次執行結尾自動上傳
     return edited
 
 

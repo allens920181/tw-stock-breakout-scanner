@@ -12,7 +12,7 @@ from pathlib import Path
 import streamlit as st
 
 from twscanner import __version__
-from twscanner.ui import state
+from twscanner.ui import state, sync
 from twscanner.ui.components.header import render_page_header
 from twscanner.ui.pages import flows, holdings, learn, lookup, research, scan, settings_page, today
 from twscanner.ui.scan_controls import current_scan_state
@@ -35,10 +35,18 @@ PAGES = [
 
 def _page(url, title, heading, module, needs_scan):
     def run():
+        sync.pull_changes()              # 別台裝置改過的先拉回來（畫 widget 之前；最多每 45 秒查一次版本）
         if url != "settings":            # 設定頁自己有標題，不需要市場狀態
             # 今日決策與找標的的結論句已經講了大盤怎麼做，頁首就不重複那句建議
             render_page_header(heading, advice=url not in ("today", "scan"))
-        _render_isolated(title, module, current_scan_state() if needs_scan else None)
+        sync.render_conflicts()
+        new_conflict = False
+        try:
+            _render_isolated(title, module, current_scan_state() if needs_scan else None)
+        finally:
+            new_conflict = sync.push_changes()   # 有變的才上傳（st.rerun 之前也會執行）
+        if new_conflict:
+            st.rerun()                   # 衝突是在結尾才發現的：重畫一次，讓頁面上方出現選擇
     run.__name__ = f"page_{url}"
     return st.Page(run, title=title, url_path=url, default=(url == "today"))
 

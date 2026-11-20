@@ -209,6 +209,11 @@ hr { border-color: var(--line) !important; }
 [data-testid="stAlertContainer"]:has([data-testid="stAlertContentInfo"]) { background: var(--info-bg) !important; }
 [data-testid="stAlertContentSuccess"], [data-testid="stAlertContentSuccess"] *,
 [data-testid="stAlertContentInfo"], [data-testid="stAlertContentInfo"] * { color: var(--info-text) !important; }
+/* ===== 雲端同步狀態 ===== */
+.sync-state { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sync-state .dot { width: 6px; height: 6px; }
+.dot.ok { background: var(--info); } .dot.error, .dot.conflict { background: var(--caution); } .dot.local { background: var(--subtle); }
+.sync-state.error, .sync-state.conflict { color: var(--caution-text); }
 /* ===== 報價式頁首（個股健檢）===== */
 .quote { margin: 0 0 14px 0; }
 .quote .q-name { font-size: 1.05rem; font-weight: 600; }

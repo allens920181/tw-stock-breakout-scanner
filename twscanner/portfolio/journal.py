@@ -52,18 +52,17 @@ def save_journal(records, path=None):
         return False
 
 
-def log_signals(df, scan_date, mode="breakout", signals=("進場",), path=None):
-    """把掃描結果中的進場（預設）清單追加進日誌。回傳新增筆數。"""
+def append_signals(records, df, scan_date, mode="breakout", signals=("進場",)):
+    """純函式：把掃描結果中的進場（預設）清單加進 records（依掃描日 + 代號去重）。回 (新 records, 新增筆數)。"""
+    records = list(records or [])
     if df is None or len(df) == 0 or "訊號判斷" not in df.columns:
-        return 0
-    records = load_journal(path)
+        return records, 0
     existing = {(r.get("掃描日"), r.get("股票")) for r in records}
     added = 0
     for _, row in df.iterrows():
         if row.get("訊號判斷") not in signals:
             continue
-        sym = row.get("股票")
-        key = (scan_date, sym)
+        key = (scan_date, row.get("股票"))
         if key in existing:
             continue
         rec = {"掃描日": scan_date, "模式": mode}
@@ -77,6 +76,12 @@ def log_signals(df, scan_date, mode="breakout", signals=("進場",), path=None):
         records.append(rec)
         existing.add(key)
         added += 1
+    return records, added
+
+
+def log_signals(df, scan_date, mode="breakout", signals=("進場",), path=None):
+    """命令列用：追加進本機日誌檔，回傳新增筆數。（網頁版的日誌存在 session / 雲端，不寫伺服器檔案）"""
+    records, added = append_signals(load_journal(path), df, scan_date, mode, signals)
     if added:
         save_journal(records, path)
     return added

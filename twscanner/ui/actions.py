@@ -13,11 +13,10 @@ from twscanner.core.tz import now_tw, today_tw
 from twscanner.data.prices import load_stock_list
 from twscanner.services import run_scan
 from twscanner.services.scan import merge_pool, refresh_prices, split_by_pool
-from twscanner.storage import cloud as store
 from twscanner.storage.history import cleanup_old, save_scan
 from twscanner.ui.scan_controls import scope_key, scope_label
 from twscanner.ui.settings import build_cfg
-from twscanner.ui.state import cloud_owner, current_pool, get_universe_items, save_pool
+from twscanner.ui.state import current_pool, get_journal, get_universe_items, save_pool, set_journal
 
 log = logging.getLogger(__name__)
 
@@ -155,12 +154,12 @@ def _after_scan(result, mode):
     except Exception as e:
         log.warning("存歷史失敗：%s", e)
     try:
-        from twscanner.portfolio.journal import load_journal, log_signals
-        added = log_signals(result["df"], today_tw().isoformat(), mode=mode, signals=("進場",))
+        from twscanner.portfolio.journal import append_signals
+        records, added = append_signals(get_journal(), result["df"], today_tw().isoformat(), mode=mode,
+                                        signals=("進場",))
         if added:
-            st.toast(f"已記錄 {added} 筆進場訊號到實戰日誌", icon="📓")
-            if cloud_owner():
-                store.save_journal(cloud_owner(), load_journal())
+            set_journal(records)          # 登入時由雲端同步上傳；不寫伺服器檔案
+            st.toast(f"已記錄 {added} 筆進場訊號到實戰日誌")
     except Exception as e:
         log.warning("訊號日誌記錄失敗：%s", e)
 

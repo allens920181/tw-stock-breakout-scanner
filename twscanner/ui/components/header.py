@@ -5,6 +5,7 @@ import html
 import streamlit as st
 
 from twscanner.core.tz import now_tw
+from twscanner.ui import sync
 from twscanner.ui.state import get_market_state_cached, get_us_state_cached
 
 
@@ -89,9 +90,12 @@ def render_header(title, market_state, last_scan_at=None, us_state=None, advice=
     big = market_state.get("big_state") if market_state else None
     adv_text, adv_cls = overall_advice(market_state, us_state, big)
     meta = zh_date(now_tw()) + (f" · 上次掃描 {last_scan_at}" if last_scan_at else "")
+    sync_text, sync_state = sync.status()
+    sync_html = (f" · <span class='sync-state {sync_state}'><i class='dot {sync_state}'></i>{esc(sync_text)}</span>"
+                 if sync_text else "")
     st.markdown(
         f"<div class='page-head'><div><div class='page-title'>{esc(title)}</div>"
-        f"<div class='page-meta'>{esc(meta)}</div></div>"
+        f"<div class='page-meta'>{esc(meta)}{sync_html}</div></div>"
         f"<div class='mkt'>{status}</div></div>"
         + (f"<div class='mkt-advice {adv_cls}'>{esc(adv_text)}</div>" if advice else "<div class='mkt-advice'></div>"),
         unsafe_allow_html=True)

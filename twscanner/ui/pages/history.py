@@ -4,11 +4,10 @@ import pandas as pd
 import streamlit as st
 
 from twscanner.services import run_evaluate_journal
-from twscanner.storage import cloud as store
 from twscanner.storage.history import list_scans, load_scan_df
 from twscanner.ui.format import clean_stock_col
 from twscanner.ui.settings import build_cfg
-from twscanner.ui.state import cloud_owner
+from twscanner.ui.state import cloud_owner, get_journal, set_journal
 
 
 def render():
@@ -19,25 +18,23 @@ def render():
         "回測是歷史模擬；**這裡是真帳**——每次掃描的「進場」清單自動存檔，"
         "用後續真實價格量**實際 R**，檢查系統實戰準不準。樣本要時間累積，越跑越準。"
     )
-    from twscanner.portfolio.journal import load_journal, save_journal
-    _jrecords = load_journal()
+    _jrecords = get_journal()
+    if not cloud_owner():
+        st.caption("沒有登入雲端時，日誌只存在這個分頁；到「設定」頁登入，日誌會跟著帳號保存。")
     jc1, jc2, jc3 = st.columns([1.4, 1, 1])
     jc1.caption(f"日誌累計 {len(_jrecords)} 筆進場訊號")
     eval_btn = jc2.button("評估實戰績效", key="eval_journal",
                           use_container_width=True, disabled=not _jrecords)
     if jc3.button("清空日誌", key="clear_journal", use_container_width=True,
                   disabled=not _jrecords):
-        save_journal([])
-        if cloud_owner():
-            store.save_journal(cloud_owner(), [])
-        st.session_state.pop("journal_eval", None)
-        st.toast("已清空訊號日誌", icon="🗑")
+        set_journal([])
+        st.toast("已清空訊號日誌")
         st.rerun()
     if eval_btn:
         cfg = build_cfg()
         with st.spinner("抓後續價格、計算實際 R …"):
             try:
-                st.session_state["journal_eval"] = run_evaluate_journal(cfg)
+                st.session_state["journal_eval"] = run_evaluate_journal(cfg, records=_jrecords)
             except Exception as e:
                 st.error(f"評估失敗：{e}")
     if st.session_state.get("journal_eval"):
