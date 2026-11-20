@@ -9,6 +9,15 @@ import streamlit as st
 
 from twscanner.ui.format import dir_color, fmt_money, fmt_pct, fmt_price, strip_icon
 
+# 交易紀律：完整版在學習中心；平常在用得到的地方出現（我已買進、持股出場建議、月虧損上限）
+TRADING_RULES = [
+    "進場前先決定停損價與張數，下單時一起設好停損。",
+    "虧損的部位不攤平；到停損價就出場，不找理由。",
+    "到 +1R 先賣一半，剩下的用移動停利保護。",
+    "10 個交易日還沒到 +1R 就出場，資金拿去做更好的機會。",
+    "本月虧損到上限就停手，下個月再來。目標是三個月平均，不是每個月都要賺。",
+]
+
 GRADE_TEXT = {"A": "A 強力進場", "B": "B 可進場", "C": "C 觀察", "避開": "避開"}
 
 
@@ -126,6 +135,9 @@ def buy_form(plan, key):
     from twscanner.ui.state import add_holding
 
     with st.expander("我已買進 → 加入持股", expanded=False):
+        stop = plan.get("stop")
+        st.caption(f"下單前：同時設好停損 {fmt_price(stop)}，跌破就出場、不攤平；到 +1R 先賣一半；"
+                   f"10 個交易日沒到 +1R 就出場。" if stop else "下單前先決定停損價與張數，下單時一起設好停損。")
         c1, c2, c3 = st.columns([1, 1, 1])
         price = c1.number_input("成交價", value=float(plan.get("entry") or 0), step=0.5, key=f"{key}_px")
         lots = c2.number_input("張數", value=max(1, int(plan.get("lots") or 1)), min_value=1, step=1,

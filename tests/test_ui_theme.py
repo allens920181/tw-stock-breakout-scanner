@@ -26,11 +26,22 @@ def test_strip_icon_keeps_chinese():
     assert strip_icon("⚠ 續抱·留意減碼") == "續抱·留意減碼"
 
 
-def test_nav_menu_not_hidden():
-    """頂部導覽在工具列裡；手機上導覽收進選單，開關是 stExpandSidebarButton。兩者都不能被 CSS 藏起來。"""
+def test_navigation_always_reachable():
+    """桌機：頂部導覽在 stToolbar 裡，不能被藏。手機：☰ 隱藏，改由底部分頁列導覽，所以分頁列一定要在手機區塊顯示。"""
     import re
-    hidden_rules = re.findall(r"([^{}]+)\{[^}]*visibility:\s*hidden", CSS)
-    assert not any("stToolbar" in sel or "stExpandSidebarButton" in sel for sel in hidden_rules)
+    hidden_rules = re.findall(r"([^{}]+)\{[^}]*(?:visibility:\s*hidden|display:\s*none)", CSS)
+    assert not any("stToolbar" in sel for sel in hidden_rules)
+    mobile = CSS[CSS.index("@media (max-width: 640px)"):]
+    assert ".st-key-tabbar { display: block !important; position: fixed" in mobile
+    assert "[data-testid=\"stExpandSidebarButton\"] { display: none" in mobile    # 只在手機藏，桌機的頂部導覽不受影響
+
+
+def test_tab_bar_pages_exist():
+    """手機分頁列的每一格都要對應到真的頁面；「更多」放其餘頁面。"""
+    from twscanner.ui.app import PAGES
+    tabs = [p for p in PAGES if p[5]]
+    assert [p[0] for p in tabs] == ["today", "scan", "lookup", "holdings"]
+    assert {p[0] for p in PAGES if not p[5]} == {"flows", "learn", "research", "settings"}
 
 
 def test_no_colored_side_bars_or_button_borders():

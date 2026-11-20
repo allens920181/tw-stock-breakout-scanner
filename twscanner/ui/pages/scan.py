@@ -10,7 +10,7 @@ from twscanner.reporting.excel import write_excel
 from twscanner.services import run_adaptive_recommend
 from twscanner.services.today import CONDITION_KEYS, sort_by_core, trade_plan
 from twscanner.ui.actions import execute_scan, pool_coverage, rescan_with_cache, sync_strategy_mode
-from twscanner.ui.components.blocks import asof, buy_form, callout, conclusion, empty, kpi_row, plan_card
+from twscanner.ui.components.blocks import asof, buy_form, callout, conclusion, empty, plan_card
 from twscanner.ui.format import clean_stock_col, colors
 from twscanner.ui.scan_controls import render_scan_controls, scope_key, scope_label
 from twscanner.ui.settings import build_cfg
@@ -129,9 +129,24 @@ def _table(df):
     event = st.dataframe(_style(view), hide_index=True, use_container_width=True,
                          height=min(36 * (len(view) + 1) + 4, 560), column_config=cfg,
                          on_select="rerun", selection_mode="single-row", key="scan_table")
-    st.caption(f"共 {len(view)} 檔 · 依訊號、分數排序 · 點一列看理由與交易計畫")
+    st.caption(f"共 {len(view)} 檔 · 依訊號、距一年高點排序 · 點一列，交易計畫會直接跳出來")
     rows = event.selection.rows if event and event.selection else []
     return d.iloc[rows[0]] if rows else None
+
+
+@st.dialog("交易計畫", width="large")
+def _plan_dialog(row, key):
+    """選中的那一檔就地彈出（不必捲到表格下方）；手機上是接近全螢幕的面板。"""
+    stock_detail(row, key)
+
+
+def _open_plan(picked):
+    """選了新的一列才自動跳出；同一列關掉後，用表格下方的按鈕再打開。"""
+    sym = str(picked.get("股票"))
+    reopen = st.button(f"看 {sym.split('.')[0]} {picked.get('公司名稱') or ''} 的交易計畫", key="scan_reopen")
+    if reopen or st.session_state.get("_scan_pick") != sym:
+        st.session_state["_scan_pick"] = sym
+        _plan_dialog(picked, f"scan_{sym}")
 
 
 def stock_detail(row, key="scan"):
@@ -278,17 +293,17 @@ def render():
                  if reuse.get("reused") and reuse.get("data_at") else "")
     asof(f"範圍：{st.session_state.get('_result_scope_label', '—')} · 策略：{mode_name} · "
          f"{int(s.get('掃描股票數', 0))} 檔 · 分析於 {st.session_state.get('last_scan_at', '')}{data_note}")
-    kpi_row([
-        ("達進場標準", f"{int(s.get('進場檔數', 0))}", "挑 1–2 檔"),
-        ("觀察", f"{int(s.get('觀察檔數', 0))}", "條件差一點"),
-        ("不操作 / 未通過過濾", f"{int(len(df) - s.get('進場檔數', 0) - s.get('觀察檔數', 0))}",
-         f"其中 {int((df['訊號判斷'] == '無法分析').sum())} 檔沒通過品質過濾" if "訊號判斷" in df else None),
-        ("大盤", (market_state or {}).get("label", "—").replace("🟢", "").replace("🔴", "")
-         .replace("🟡", "").strip() or "—", None),
-    ])
-    st.markdown("### 結果")
+    # 一行摘要取代四張數字卡（大盤狀態頁首與結論句已經講了），表格因此上移
+    n_go, n_watch = int(s.get("進場檔數", 0)), int(s.get("觀察檔數", 0))
+    n_fail = int((df["訊號判斷"] == "無法分析").sum()) if "訊號判斷" in df else 0
+    n_rest = int(len(df)) - n_go - n_watch
+    st.markdown(
+        f"<div class='res-head'><h3>結果</h3><span><b>{n_go}</b> 檔達進場 · <b>{n_watch}</b> 檔觀察 · "
+        f"{n_rest} 檔不操作" + (f"（{n_fail} 檔沒通過品質過濾）" if n_fail else "") + "</span></div>",
+        unsafe_allow_html=True)
     picked = _table(df)
     if picked is not None:
-        st.markdown("### 交易計畫")
-        stock_detail(picked, key=f"scan_{picked.get('股票')}")
+        _open_plan(picked)
+    else:
+        st.session_state.pop("_scan_pick", None)
     _advanced(result, df)

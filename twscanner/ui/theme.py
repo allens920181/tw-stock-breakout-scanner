@@ -48,7 +48,7 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
 }
 #MainMenu, footer { visibility: hidden; height: 0; }
 /* 不要隱藏 stToolbar：頂部導覽與手機選單都在它裡面。Deploy 由 config 的 toolbarMode=minimal 處理 */
-/* 手機上導覽會收進側邊選單，開關就是這顆按鈕：保持可見，改成右上角的「☰」（手機 App 的慣例） */
+/* 頂部導覽在窄螢幕會退成側邊選單；桌機保持可見。手機上改由底部分頁列導覽（見下方手機區塊），這顆按鈕在手機隱藏 */
 [data-testid="stExpandSidebarButton"] { visibility: visible !important; }
 [data-testid="stExpandSidebarButton"] span[data-testid="stIconMaterial"] { font-size: 0 !important; }
 [data-testid="stExpandSidebarButton"] span[data-testid="stIconMaterial"]::after { content: "menu"; font-size: 24px;
@@ -76,15 +76,18 @@ h2 { font-weight: 700 !important; font-size: 1.125rem !important; margin-top: 1.
 h3 { font-weight: 600 !important; font-size: 1.02rem !important; margin-top: 1.75rem !important; letter-spacing: -0.005em; }
 h4 { font-weight: 600 !important; font-size: 0.875rem !important; color: var(--muted) !important; }
 /* ===== 頁首：頁名 + 市場狀態 ===== */
-.page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 0 0 6px 0; }
+.page-head { margin: 0 0 10px 0; }
 .page-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
 .page-meta { color: var(--muted); font-size: 0.8rem; margin-top: 4px; font-variant-numeric: tabular-nums; }
-.mkt { display: flex; gap: 18px; flex-wrap: wrap; font-size: 0.86rem; }
+/* 市場狀態列：靠左、一條，三燈 + 該怎麼做（取代右上角的狀態與每頁重複的建議句） */
+.mkt-strip { display: flex; align-items: center; gap: 6px 18px; flex-wrap: wrap; font-size: 0.86rem;
+    margin: 0 0 22px 0; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.mkt-adv { color: var(--muted); }
+.mkt-adv.bear { color: var(--caution-text); }
 .mkt-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--text); font-weight: 600; }
 .mkt-item .k { color: var(--muted); font-weight: 500; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: 0 0 auto; background: var(--subtle); }
 .dot.bull { background: var(--up); } .dot.bear { background: var(--down); } .dot.neutral { background: var(--flat); }
-.mkt-advice { color: var(--muted); font-size: 0.86rem; margin: 0 0 22px 0; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 /* ===== 結論句：大字、不加框 ===== */
 .conclusion { margin: 4px 0 18px 0; line-height: 1.55; }
 .conclusion .tone { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 999px;
@@ -140,6 +143,11 @@ h4 { font-weight: 600 !important; font-size: 0.875rem !important; color: var(--m
 .rowline .d { color: var(--muted); font-size: 0.84rem; line-height: 1.6; }
 .rowline .v { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .health-v { width: 64px; flex: 0 0 64px; }
+.goal { margin: 4px 0 12px 0; }
+.goal-num { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.goal-num .of { color: var(--muted); font-size: 0.95rem; font-weight: 500; }
+.goal-status { color: var(--muted); font-size: 0.84rem; line-height: 1.6; }
+.kpi .warn, .kpi .sub .warn { color: var(--caution); }
 .goalbar { background: var(--flat-bg); border-radius: 999px; height: 8px; overflow: hidden; margin: 8px 0; }
 .goalbar > div { height: 100%; border-radius: 999px; }
 /* ===== 空狀態 / 資料時間 / 課程 / 提醒 ===== */
@@ -221,22 +229,61 @@ hr { border-color: var(--line) !important; }
 .quote .q-px { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .quote .q-chg { font-size: 1rem; font-weight: 600; margin-left: 10px; }
 .quote .q-meta { color: var(--subtle); font-size: 0.75rem; }
+/* 資金流向摘要卡：無框淺灰底 */
+[class*="st-key-flowcard_"] { background: var(--surface); border-radius: var(--radius); padding: 14px 16px; height: 100%; }
+[class*="st-key-flowcard_"] [data-testid="stExpander"] details { background: transparent !important; }
+[class*="st-key-flowcard_"] [data-testid="stExpander"] summary { padding: 6px 0 !important; }
+.fc-title { color: var(--muted); font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
+.fc-lead { font-size: 0.95rem; line-height: 1.6; }
+/* 閱讀型內容（學習中心）：限制行長，中文每行約 35–40 字 */
+[class*="st-key-reading"] { max-width: 760px; }
+/* 區塊標題＋同一行摘要（找標的的結果數量） */
+.res-head { display: flex; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; margin: 8px 0 4px 0; }
+.res-head h3 { margin: 0 !important; padding: 0 !important; }
+.res-head span { color: var(--muted); font-size: 0.88rem; }
+.res-head b { color: var(--text); font-variant-numeric: tabular-nums; }
+/* ===== 手機底部分頁列（桌機隱藏）===== */
+.st-key-tabbar, [data-testid="stLayoutWrapper"]:has(> .st-key-tabbar) { display: none !important; }   /* 連外層一起藏，桌機不留空隙 */
 /* ===== 手機 ===== */
 @media (max-width: 640px) {
-    [data-testid="stExpandSidebarButton"] { position: fixed !important; right: 10px; top: 12px; z-index: 1000; }
-    .block-container { padding-left: 1rem; padding-right: 1rem; padding-top: 4.2rem; }
+    /* 導覽改由底部分頁列負責：拇指碰得到（Hoober），也不用藏在 ☰（NN/g） */
+    [data-testid="stExpandSidebarButton"] { display: none !important; }
+    .block-container { padding-left: 1rem; padding-right: 1rem; padding-top: 3.9rem;
+        padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)) !important; }
+    [data-testid="stLayoutWrapper"]:has(> .st-key-tabbar) { display: contents !important; }   /* 不佔版面、不留間距 */
+    .st-key-tabbar { display: block !important; position: fixed; left: 0; right: 0; bottom: 0; z-index: 999;
+        background: rgba(255,255,255,0.97); backdrop-filter: saturate(180%) blur(8px); border-top: 1px solid var(--line);
+        padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); }
+    .st-key-tabbar [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 0 !important; }
+    .st-key-tabbar [data-testid="stColumn"] { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; }
+    .st-key-tabbar [data-testid="stPageLink"] a, .st-key-tabbar [data-testid="stPopoverButton"] {
+        display: flex !important; flex-direction: column !important; align-items: center !important; gap: 2px !important;
+        padding: 6px 0 !important; background: transparent !important; border: none !important; width: 100% !important;
+        min-height: 52px; justify-content: center; }
+    .st-key-tabbar [data-testid="stPageLink"] a p, .st-key-tabbar [data-testid="stPopoverButton"] p {
+        font-size: 0.7rem !important; color: var(--muted) !important; margin: 0 !important; line-height: 1.2 !important; }
+    .st-key-tabbar [data-testid="stPopoverButton"] [data-testid="stMarkdownContainer"] { margin: 0 !important; }
+    .st-key-tabbar [data-testid="stPageLink"] a span[data-testid="stIconMaterial"],
+    .st-key-tabbar [data-testid="stPopoverButton"] span[data-testid="stIconMaterial"] { font-size: 22px !important; color: var(--muted) !important; }
+    .st-key-tabbar [data-testid="stElementContainer"], .st-key-tabbar [data-testid="stLayoutWrapper"],
+    .st-key-tabbar [data-testid="stPopover"], .st-key-tabbar [data-testid="stPageLink"] { width: 100% !important; }
+    .st-key-tabbar [data-testid="stPopoverButton"] > div { justify-content: center !important; width: 100%; }
+    .st-key-tabbar [data-testid="stPopoverButton"] span[data-has-shortcut] { display: flex !important; flex-direction: column !important;
+        align-items: center !important; gap: 2px !important; }
+    .st-key-tabbar [data-testid="stPopoverButton"] div[aria-hidden="true"] { display: none !important; }
+    [class*="st-key-tab_"][class*="_on"] p, [class*="st-key-tab_"][class*="_on"] span[data-testid="stIconMaterial"] {
+        color: var(--text) !important; font-weight: 600 !important; }
     .st-key-scanbar [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: 8px !important; }
     .st-key-scanbar [data-testid="stColumn"] { flex: 1 1 calc(50% - 4px) !important; min-width: calc(50% - 4px) !important;
         width: calc(50% - 4px) !important; }
     .st-key-scanbar button p { overflow: hidden; text-overflow: ellipsis; }
-    .page-title { font-size: 1.35rem; }
-    .page-head { align-items: flex-start; }
-    .mkt { gap: 12px; font-size: 0.8rem; }
-    .mkt-advice { font-size: 0.82rem; margin-bottom: 16px; padding-bottom: 14px; }
+    .page-title { font-size: 1.25rem; }
+    .mkt-strip { gap: 4px 12px; font-size: 0.8rem; margin-bottom: 14px; padding-bottom: 12px; }
     .conclusion .lead { font-size: 1.12rem; }
     .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .kpi { padding: 12px 14px; }
-    .kpi .value { font-size: 1.22rem; }
+    .kpi { padding: 10px 12px; }
+    .kpi .label, .kpi .sub { font-size: 0.72rem; }
+    .kpi .value { font-size: 1.12rem; line-height: 1.3; }
     [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
     .plan { padding: 14px; }
     .plan .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from twscanner.analysis.goal import simulate_months, trades_needed
+from twscanner.ui.components.blocks import TRADING_RULES
 from twscanner.ui.components.charts import plot
 from twscanner.ui.format import colors, fmt_money
 from twscanner.ui.glossary import HELP
@@ -43,10 +44,13 @@ def _philosophy():
             "月底還沒達標就加碼、放寬停損，是散戶最常見的爆倉路徑。")
 
     _lesson("6. 用證據檢查自己的方法",
-            "2026 年 11 月用 1,034 檔上市股、兩年資料做的實證：系統的突破訊號、相對強度挑股，都沒有比「在同樣條件下隨機挑股」更好。"
-            "前 15 個月連隨機挑都賺，最近 6 個月沒有任何一種方法有顯著獲利。代表賺錢的關鍵是大盤環境與風險控制，不是挑中哪一檔。"
+            "2026 年 11 月用 10 年、1,033 檔上市股比較 8 個常見指標：最穩的是「距一年高點」，大盤不是空頭時，"
+            "收盤在一年高點 90% 以上的股票，之後一個月平均比全部股票多賺約 1 個百分點，9 年都跑贏平均；空頭時沒有優勢。"
+            "另一份兩年的研究也顯示，突破那一天才買沒有額外好處。賺錢靠的是「大盤環境 + 挑夠強的股票 + 風險控制」。"
             "詳見「策略驗證 → 大樣本實證」。")
 
+
+def _goal_calculator():
     st.markdown("### 你的月目標，用數字算一次")
     c1, c2, c3 = st.columns(3)
     cap = c1.number_input("總資金（元）", 100_000, 50_000_000, int(st.session_state.get("total_capital", 1_000_000)),
@@ -73,21 +77,25 @@ def _philosophy():
 
 # ---------------------------------------------------------------
 def _system():
+    _goal_calculator()                 # 最常用、能互動的工具放在最上面
     st.markdown("## 系統怎麼用")
     st.markdown(
         "**每天收盤後 10 分鐘的流程**（今日決策頁就是照這個順序排的）：\n\n"
-        "1. 看頁首三顆燈與綜合建議。**台股空頭時不開新倉**。\n"
+        "1. 看頁名下方的市場狀態列（台股、美股、大資金三燈與該怎麼做）。**台股空頭時不開新倉**。\n"
         "2. 先處理持股：今日決策或「持股與紀錄」會列出要賣、要減半的。\n"
         "3. 看今日候選的交易計畫卡，挑 1–2 檔。\n"
         "4. 隔天開盤前掛單，同時把停損設好。買進後按「我已買進」記入持股。\n"
         "5. 賣出後在持股表點那一列「記入交易紀錄」，月損益與勝率會自動統計。")
+    st.markdown("### 交易紀律（完整版）")
+    st.caption("平常會在用得到的地方出現：按「我已買進」時提醒停損、持股到時間停損時出場建議會寫出來。")
+    st.markdown("\n".join(f"{i}. {r}" for i, r in enumerate(TRADING_RULES, 1)))
     st.markdown("### 三種策略模式")
     st.markdown(
         "| 模式 | 抓什麼 | 適合誰 |\n|---|---|---|\n"
         "| 強勢突破 | 已突破近 20 日高點、量增、法人買 | 想跟著動能走，接受買在已漲一段 |\n"
         "| 早期突破 | 剛突破、還沒漲太遠的 | 想參與突破但不想追高 |\n"
         "| 潛伏起漲前 | 窄幅整理、量縮、站穩均線、接近但還沒突破 | 想在發動前埋伏，願意等 |")
-    st.markdown("### 頁首三顆燈")
+    st.markdown("### 市場狀態列的三顆燈")
     st.markdown(
         "- **台股**：加權指數相對均線的位置與趨勢。空頭時系統自動把進場降為觀察。\n"
         "- **美股**：VIX 恐慌指數與 S&P 500 趨勢合成的風險胃口。美股轉弱時建議張數會縮小。\n"
@@ -234,7 +242,7 @@ def _macro():
             "恐慌時股票常被一起賣出，這時強勢股的突破也比較容易失敗，所以系統會縮小部位。")
     _lesson("總經怎麼用在短線上",
             "總經不決定你買哪一檔，它決定「現在該用多大的部位」。順風（台股多頭、美股風險偏好、外資買超）時正常操作；"
-            "逆風時縮小部位或休息。這就是頁首三顆燈的用途。")
+            "逆風時縮小部位或休息。這就是市場狀態列三顆燈的用途。")
 
 
 def _glossary():
@@ -252,5 +260,5 @@ def _glossary():
 def render():
     tabs = st.tabs(["先讀這篇", "系統怎麼用", "股票與交易", "公司財報", "營運指標", "總體經濟", "名詞表"])
     for tab, fn in zip(tabs, (_philosophy, _system, _stocks, _financials, _operations, _macro, _glossary)):
-        with tab:
+        with tab, st.container(key=f"reading_{fn.__name__}"):    # 閱讀寬度約 760px
             fn()
