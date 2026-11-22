@@ -1,5 +1,15 @@
 # 策略實證研究（2026-11）
 
+> **最新結論（投資組合實測）：有證據的做法是「距一年高點 ≥ 90% ＋ 月營收驚喜最高的 20 檔，每月營收公布後換股」。** 2005–2026 年、1,034 檔、扣成本，全期年化 25.5%，同期 0050 含息 13.6%；兩個獨立時段與 17 種單一條件變動都成立。只看價格的規則沒有穩定贏過 0050；停損與大盤擇時都降低報酬。限制：只含仍上市的股票（報酬偏樂觀）、最大回撤 −32%、最近兩年落後 0050。資料：[`portfolio_study_2026-11.json`](../../docs/research/portfolio_study_2026-11.json)；完整報告：[`reports/台股波段買賣規則實證研究.md`](../../reports/台股波段買賣規則實證研究.md)。
+>
+> ```bash
+> S=/tmp/study && mkdir -p $S
+> uv run python scripts/strategy_study/download_max.py $S/max.pkl                 # 2000 年起日線（約 5 分鐘）
+> uv run python scripts/strategy_study/download_revenue.py $S/max.pkl $S/rev      # 月營收歷史（FinMind，可續抓）
+> uv run python scripts/strategy_study/portfolio_study.py $S/max.pkl $S/rev docs/research/portfolio_study_2026-11.json
+> ```
+> 引擎在 `portfolio_engine.py`：固定檔數、等權、收盤決定隔天開盤成交、一字漲停買不到、跌停鎖死賣不掉。
+
 > **結論：最值得用的一個指標是「距一年高點」**（收盤 ÷ 一年最高價）。10 年、1,033 檔：大盤非空頭時，≥ 90% 的股票之後 1 個月平均 +1.61%（扣成本），全部可交易股 +0.51%；74% 的週數、每一年都跑贏平均。大盤空頭時沒有優勢。資料：[`core_indicator_2026-11.json`](../../docs/research/core_indicator_2026-11.json)。
 
 回答一個問題：**在實盤會下單的條件下，系統的選股訊號有沒有比隨機進場好？**
