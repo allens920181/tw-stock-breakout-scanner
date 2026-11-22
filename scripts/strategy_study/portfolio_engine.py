@@ -71,14 +71,19 @@ class Rules:
 
 
 def simulate(p: Panel, score: pd.DataFrame, tradable: pd.DataFrame, rules: Rules,
-             bear: pd.Series | None = None, start=None, end=None, capital=1_000_000.0, seed=None):
-    """回傳 (每日淨值 Series, 交易明細 DataFrame, 統計 dict)。seed 不為 None 時同分隨機排序。"""
+             bear: pd.Series | None = None, start=None, end=None, capital=1_000_000.0, seed=None,
+             keep: pd.DataFrame | None = None):
+    """回傳 (每日淨值 Series, 交易明細 DataFrame, 統計 dict)。seed 不為 None 時同分隨機排序。
+
+    keep：續抱條件（布林表）。有給的話，持股只要仍可交易且 keep 為真就不換，不看名次。
+    """
     dates = p.C.index
     i0 = dates.searchsorted(pd.Timestamp(start)) if start else 260
     i1 = dates.searchsorted(pd.Timestamp(end)) if end else len(dates)
     Op, H, L, C, A, AO = (x.to_numpy() for x in (p.Op, p.H, p.L, p.C, p.A, p.AO))
     S = score.to_numpy(dtype=float)
     T = tradable.to_numpy()
+    K = keep.to_numpy() if keep is not None else None
     B = bear.reindex(dates).fillna(False).to_numpy() if bear is not None else np.zeros(len(dates), bool)
     rng = np.random.default_rng(seed) if seed is not None else None
 
@@ -158,7 +163,10 @@ def simulate(p: Panel, score: pd.DataFrame, tradable: pd.DataFrame, rules: Rules
         rank[order] = np.arange(len(s))
         keep_rank = max(rules.n, int(n_ok * rules.keep_pct)) if rules.keep_pct else rules.n
         for c in pos:
-            if not ok[c] or rank[c] >= keep_rank:
+            if K is not None:
+                if not (T[i, c] and K[i, c]):
+                    pending_sell.add(c)
+            elif not ok[c] or rank[c] >= keep_rank:
                 pending_sell.add(c)
         if rules.regime == "no_new" and is_bear:
             continue
