@@ -12,6 +12,7 @@ import streamlit as st
 
 from twscanner.market import flows as F
 from twscanner.ui.components.charts import plot
+from twscanner.ui.components.recovery import render_recovery
 from twscanner.ui.format import colors
 
 # 與 app.py 一致的色票
@@ -505,9 +506,13 @@ def render_flows_tab(cache_dir=".cache", tw_days=20):
         st.rerun()
 
     # 一看就懂的台股法人長條圖放第一個；RRG 門檻較高，放第二
-    t_tw, t_us, t_link, t_help = st.tabs(["台股資金", "美國資金", "台美連動", "怎麼看"])
+    t_tw, t_us, t_link, t_rec, t_help = st.tabs(["台股資金", "美國資金", "台美連動", "止跌檢查", "怎麼看"])
     with t_tw:
         _render_tw(twd)
+    with t_rec:
+        from twscanner.ui.state import get_recovery_cached
+        with st.spinner("讀取止跌訊號…"):
+            render_recovery(get_recovery_cached(), heading="止跌訊號與劇本線索")
     with t_us:
         _render_us(us)
     with t_link:

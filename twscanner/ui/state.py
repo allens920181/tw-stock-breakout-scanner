@@ -6,6 +6,7 @@ import streamlit as st
 from twscanner.core.config import load_config
 from twscanner.core.tz import today_tw
 from twscanner.data.universe import fetch_twse_universe
+from twscanner.market.recovery import fetch_recovery
 from twscanner.market.tw_regime import classify_market
 from twscanner.market.us_regime import classify_us_market
 from twscanner.portfolio import trade_log
@@ -53,6 +54,20 @@ def get_us_state_cached():
         return _us_state()
     except Exception:
         return {"regime": "unknown", "label": "未知", "position_factor": 1.0, "detail": "美股資料暫時抓不到"}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _recovery():
+    cfg = get_base_config()
+    return fetch_recovery(cfg["data"]["cache_dir"], cfg["data"]["period"])
+
+
+def get_recovery_cached():
+    """止跌訊號與劇本線索；整體失敗回 None（個別來源失敗會在項目內顯示「暫無資料」）。"""
+    try:
+        return _recovery()
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=86400)

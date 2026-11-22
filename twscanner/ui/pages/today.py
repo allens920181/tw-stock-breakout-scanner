@@ -1,5 +1,6 @@
 """
 今日決策（預設首頁）：結論 → 三個數字 → 今天要做的事（左欄）＋本月目標（右欄）。
+大盤空頭時，右欄最上面多一塊「止跌檢查」：回答「什麼時候可以再開新倉」。
 
 順序跟著情境：有持股要處理時先列持股（先賣後買）；沒有時候選交易計畫排第一。
 同一個數字只出現一次；交易紀律在用得到的地方出現（我已買進、出場建議），完整版在學習中心。
@@ -24,9 +25,10 @@ from twscanner.ui.components.blocks import (
     plan_card,
     signed_value,
 )
+from twscanner.ui.components.recovery import render_recovery
 from twscanner.ui.format import dir_color, fmt_money, fmt_pct, fmt_r, stock_label
 from twscanner.ui.settings import build_cfg
-from twscanner.ui.state import get_market_state_cached, get_sector_map, get_trades_df
+from twscanner.ui.state import get_market_state_cached, get_recovery_cached, get_sector_map, get_trades_df
 
 SHOW_PLANS = 3        # 候選交易計畫先顯示幾張，其餘收合
 DUP_WARNINGS = ("全部打到停損會賠", "同時持有")     # 這兩種已經在結論句與數字卡說過
@@ -77,12 +79,13 @@ def _goal_section(t):
 
 def render(sb):
     cfg = build_cfg()
+    ms = _market_state()
     holdings_res = st.session_state.get("holdings_result")
     holdings_df = holdings_res["df"] if holdings_res else None
     trades = compute(get_trades_df(), cfg.get("costs"))
     scan_df = st.session_state["result"]["df"] if st.session_state.get("result") else None
     t = build_today(
-        _market_state(), scan_df, holdings_df, trades, cfg, today_tw().strftime("%Y-%m"),
+        ms, scan_df, holdings_df, trades, cfg, today_tw().strftime("%Y-%m"),
         target=float(st.session_state.get("month_target", 10_000)),
         loss_limit_r=float(st.session_state.get("loss_limit_r", 2.0)),
         backtest=st.session_state.get("backtest_result"), sector_map=get_sector_map())
@@ -119,6 +122,10 @@ def render(sb):
             _candidates_section(t, scan_df, sb)
             _holdings_section(t)
     with side:
+        if (ms or {}).get("regime") == "bear":
+            with st.spinner("讀取止跌訊號…"):
+                rec = get_recovery_cached()
+            render_recovery(rec)
         _goal_section(t)
 
 

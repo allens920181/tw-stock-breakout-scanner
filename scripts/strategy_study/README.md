@@ -17,6 +17,7 @@ uv run python scripts/strategy_study/rs_test.py $S/data2y.pkl $S/cache scripts/s
 uv run python scripts/strategy_study/index_timing.py $S/index_timing.json   # 10 年大盤燈號擇時 vs 買進持有
 uv run python scripts/strategy_study/download10y.py $S/data2y.pkl $S/data10y.pkl   # 10 年日線（約 3 分鐘）
 uv run python scripts/strategy_study/core_indicator.py $S/data10y.pkl docs/research/core_indicator_2026-11.json  # 8 個指標比較 → 核心指標
+uv run python scripts/strategy_study/recovery_signals.py $S/recovery docs/research/recovery_2026-11.json  # 大跌後的止跌訊號與劇本線索
 ```
 
 ## 方法
