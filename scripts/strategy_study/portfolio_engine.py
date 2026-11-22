@@ -72,10 +72,11 @@ class Rules:
 
 def simulate(p: Panel, score: pd.DataFrame, tradable: pd.DataFrame, rules: Rules,
              bear: pd.Series | None = None, start=None, end=None, capital=1_000_000.0, seed=None,
-             keep: pd.DataFrame | None = None):
+             keep: pd.DataFrame | None = None, rebal: pd.Series | None = None):
     """回傳 (每日淨值 Series, 交易明細 DataFrame, 統計 dict)。seed 不為 None 時同分隨機排序。
 
     keep：續抱條件（布林表）。有給的話，持股只要仍可交易且 keep 為真就不換，不看名次。
+    rebal：換股日（布林 Series）。有給的話取代 rules.step（例如每月營收公布後第一個交易日）。
     """
     dates = p.C.index
     i0 = dates.searchsorted(pd.Timestamp(start)) if start else 260
@@ -84,6 +85,7 @@ def simulate(p: Panel, score: pd.DataFrame, tradable: pd.DataFrame, rules: Rules
     S = score.to_numpy(dtype=float)
     T = tradable.to_numpy()
     K = keep.to_numpy() if keep is not None else None
+    RB = rebal.reindex(dates).fillna(False).to_numpy() if rebal is not None else None
     B = bear.reindex(dates).fillna(False).to_numpy() if bear is not None else np.zeros(len(dates), bool)
     rng = np.random.default_rng(seed) if seed is not None else None
 
@@ -150,7 +152,8 @@ def simulate(p: Panel, score: pd.DataFrame, tradable: pd.DataFrame, rules: Rules
             pending_sell.update(pos.keys())
             continue
         empty = not pos and not pending_buy          # 空手（例如空頭全出之後）：不等換股日，隔天就重新建倉
-        if (i - i0 + rules.offset) % rules.step != 0 and not empty:
+        due = RB[i] if RB is not None else (i - i0 + rules.offset) % rules.step == 0
+        if not due and not empty:
             continue                                  # 非換股日：停損空出的位子等下次換股日再補
         s = S[i].copy()
         ok = T[i] & ~np.isnan(s) & (s >= rules.min_score)
