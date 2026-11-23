@@ -129,6 +129,7 @@ def execute_scan(sb, fresh_prices=True):
             logging.getLogger().removeHandler(handler)
 
         st.session_state["result"] = result
+        st.session_state["_result_partial"] = False
         st.session_state["scan_cache"] = result.get("scan_cache")
         st.session_state["cfg"] = cfg
         st.session_state["_result_mode"] = st.session_state.get("strategy_mode", "breakout")

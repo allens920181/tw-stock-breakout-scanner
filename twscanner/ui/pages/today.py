@@ -15,6 +15,7 @@ from twscanner.core.tz import today_tw
 from twscanner.portfolio.trade_log import compute
 from twscanner.services.today import build_today
 from twscanner.ui.actions import analyze_holdings, execute_scan
+from twscanner.ui.components.autoscan import scheduled_panel
 from twscanner.ui.components.blocks import (
     action_badge,
     buy_form,
@@ -167,6 +168,7 @@ def _candidates_section(t, scan_df, sb):
     if scan_df is None:
         empty("今天還沒掃描", "用「找標的」頁目前的範圍與策略掃描（全台股第一次約 5–15 分鐘，同一天再掃不到 1 分鐘）。"
               "要換範圍或策略，到「找標的」頁上方調整。")
+        scheduled_panel()
         if st.button("開始掃描", type="primary", key="today_scan"):
             execute_scan(sb)
             st.rerun()

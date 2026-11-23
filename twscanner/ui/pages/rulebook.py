@@ -7,11 +7,14 @@ import streamlit as st
 
 from twscanner.analysis.revenue_surprise import BUY_HIGH_PCT, CHECK_DAY, KEEP_HIGH_PCT, RULE_N
 from twscanner.core.config import PROJECT_ROOT
+from twscanner.services.jobs import load_rulebook
 from twscanner.services.rulebook import build_rulebook
+from twscanner.storage import cloud as store
 from twscanner.ui.components.blocks import callout, conclusion, empty, kpi_row
 from twscanner.ui.components.charts import plot
 from twscanner.ui.format import fmt_pct
 from twscanner.ui.settings import build_cfg
+from twscanner.ui.state import cloud_owner
 
 STUDY = PROJECT_ROOT / "docs" / "research" / "portfolio_study_2026-11.json"
 INK, GREY, MID = "#18181B", "#D4D4D8", "#2563EB"
@@ -53,7 +56,8 @@ def _table(rows, extra=()):
 def _live_section(data):
     st.markdown("### 現在的名單")
     res = st.session_state.get("result")
-    scan_df = res.get("df") if res else None
+    partial = bool(st.session_state.get("_result_partial"))
+    scan_df = res.get("df") if res and not partial else None
     held = st.session_state.get("holdings_df")
     codes = [str(c).strip() for c in held["股票代號"].dropna()] if held is not None and "股票代號" in held else []
     if scan_df is not None and len(scan_df):
@@ -66,7 +70,14 @@ def _live_section(data):
                 scan_df, cfg["data"]["cache_dir"], holding_codes=codes,
                 progress_cb=lambda p, msg: bar.progress(min(1.0, p), text=msg))
             bar.empty()
+    if partial:
+        st.caption("目前表格是排程掃描載入的，只有進場與觀察的股票，無法在這裡重算；下面用排程算好的名單。"
+                   "要自己重算，請先到「找標的」按「開始掃描」。")
     rb = st.session_state.get("rulebook")
+    if rb is None and store.is_enabled() and cloud_owner():
+        rb = load_rulebook(cloud_owner())
+        if rb:
+            st.caption(f"排程計算於 {str(rb.get('at', ''))[:16].replace('T', ' ')}（營收月份 {rb['month']}）。")
     if rb:
         if rb["candidates"]:
             st.markdown(f"**買進名單**（營收月份 {rb['month']}；距一年高點 ≥ {BUY_HIGH_PCT:.0f}% 的有 {rb['near_high']} 檔，"

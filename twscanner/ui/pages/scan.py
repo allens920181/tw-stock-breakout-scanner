@@ -10,6 +10,7 @@ from twscanner.reporting.excel import write_excel
 from twscanner.services import run_adaptive_recommend
 from twscanner.services.today import CONDITION_KEYS, sort_by_core, trade_plan
 from twscanner.ui.actions import execute_scan, pool_coverage, rescan_with_cache, sync_strategy_mode
+from twscanner.ui.components.autoscan import render_panels
 from twscanner.ui.components.blocks import asof, buy_form, callout, conclusion, empty, plan_card
 from twscanner.ui.format import clean_stock_col, colors
 from twscanner.ui.scan_controls import render_scan_controls, scope_key, scope_label
@@ -274,6 +275,7 @@ def render():
         st.rerun()
     _scope_changed(sb)
     sync_strategy_mode(sb.mode_labels)
+    render_panels(sb)
 
     if "result" not in st.session_state:
         conclusion("還沒有掃描結果",

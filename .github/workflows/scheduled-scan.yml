@@ -1,0 +1,52 @@
+name: 排程掃描
+
+# 週一到週五台灣時間 15:40（收盤後）自動掃描，結果存到雲端資料庫，App 打開就能直接看。
+# 也可以到 GitHub 的 Actions 頁手動執行（Run workflow），選範圍與策略。
+# 需要在 repo 的 Settings → Secrets and variables → Actions 新增 DATABASE_URL（和 Streamlit 的同一條 Neon 連線字串）。
+# 修改時間：改下面的 cron（UTC 時間，台灣 = UTC+8）。
+
+on:
+  schedule:
+    - cron: "40 7 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "範圍"
+        type: choice
+        default: twse-common
+        options: [twse-common, twse, twse-etf]
+      modes:
+        description: "策略（逗號分隔）"
+        default: "breakout,early,ambush"
+      rulebook:
+        description: "計算實證規則名單（逐檔抓月營收，較慢）"
+        type: boolean
+        default: true
+
+concurrency:
+  group: scheduled-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: 掃描並存到雲端
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUD_OWNER: me
+          UNIVERSE: ${{ inputs.universe || 'twse-common' }}
+          MODES: ${{ inputs.modes || 'breakout,early,ambush' }}
+          # 排程觸發時沒有 inputs（空值），所以只有手動執行且取消勾選才跳過規則名單
+          SKIP_RULEBOOK: ${{ github.event_name == 'workflow_dispatch' && inputs.rulebook == false && '1' || '' }}
+        run: |
+          args=(--job --universe "$UNIVERSE" --modes "$MODES")
+          [ -n "$SKIP_RULEBOOK" ] && args+=(--no-rulebook)
+          uv run python main.py "${args[@]}"
