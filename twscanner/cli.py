@@ -1,12 +1,13 @@
 """命令列介面：掃描 / 全台股 / 回測，輸出 Excel 報告。"""
 import argparse
 import logging
+import os
 import sys
 
 from twscanner.core.config import load_config
 from twscanner.data.universe import fetch_twse_universe
 from twscanner.reporting.excel import write_backtest_excel, write_excel
-from twscanner.services import run_backtest, run_scan
+from twscanner.services import run_backtest, run_scan, run_scheduled
 
 
 def setup_logging(level, log_file=None):
@@ -36,6 +37,10 @@ def parse_args():
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--log-file", default=None)
 
+    p.add_argument("--job", action="store_true",
+                   help="排程模式：掃描後把進場／觀察名單存到雲端（需要環境變數 DATABASE_URL）")
+    p.add_argument("--modes", default="breakout,early,ambush", help="排程要評估的策略模式，逗號分隔")
+    p.add_argument("--no-rulebook", action="store_true", help="排程時不計算實證規則名單")
     p.add_argument("--backtest", action="store_true",
                    help="走 walk-forward 回測，不做即時掃描")
     p.add_argument("--lookback-days", type=int, default=120)
@@ -48,6 +53,15 @@ def main():
     setup_logging(args.log_level, args.log_file)
 
     cfg = load_config(args.config)
+
+    if args.job:
+        out = run_scheduled(args.config, os.environ.get("DATABASE_URL"), os.environ.get("CLOUD_OWNER", "me"),
+                            args.universe or "twse-common", [m.strip() for m in args.modes.split(",") if m.strip()],
+                            with_rulebook=not args.no_rulebook)
+        for k, v in out.items():
+            n = v.get("n_kept") if k != "rulebook" else len(v.get("candidates", []))
+            logging.getLogger("main").info("已存到雲端：%s（%s 檔）", k, n)
+        return
 
     if args.backtest:
         items = universe_items(args.universe) if args.universe else None

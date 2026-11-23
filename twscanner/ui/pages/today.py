@@ -14,7 +14,8 @@ from twscanner.analysis.goal import capital_for_target
 from twscanner.core.tz import today_tw
 from twscanner.portfolio.trade_log import compute
 from twscanner.services.today import build_today
-from twscanner.ui.actions import analyze_holdings, execute_scan
+from twscanner.ui.actions import analyze_holdings, scan_running, start_scan
+from twscanner.ui.components.autoscan import scheduled_panel
 from twscanner.ui.components.blocks import (
     action_badge,
     buy_form,
@@ -167,9 +168,10 @@ def _candidates_section(t, scan_df, sb):
     if scan_df is None:
         empty("今天還沒掃描", "用「找標的」頁目前的範圍與策略掃描（全台股第一次約 5–15 分鐘，同一天再掃不到 1 分鐘）。"
               "要換範圍或策略，到「找標的」頁上方調整。")
-        if st.button("開始掃描", type="primary", key="today_scan"):
-            execute_scan(sb)
-            st.rerun()
+        scheduled_panel()
+        if st.button("開始掃描", type="primary", key="today_scan", disabled=scan_running()):
+            if start_scan(sb):
+                st.rerun()
     elif not t["candidates"]:
         empty("沒有進場或觀察名單", "今天沒有符合條件的股票。沒有好機會時不做，也是一種操作。")
     elif not t["can_open"]:

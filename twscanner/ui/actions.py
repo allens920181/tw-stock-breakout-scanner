@@ -5,29 +5,21 @@
 """
 import logging
 import tempfile
+import time
 
 import pandas as pd
 import streamlit as st
 
 from twscanner.core.tz import now_tw, today_tw
 from twscanner.data.prices import load_stock_list
-from twscanner.services import run_scan
-from twscanner.services.scan import merge_pool, refresh_prices, split_by_pool
+from twscanner.services import JobRunner, run_pool_scan, run_scan
+from twscanner.services.scan import split_by_pool
 from twscanner.storage.history import cleanup_old, save_scan
 from twscanner.ui.scan_controls import scope_key, scope_label
 from twscanner.ui.settings import build_cfg
 from twscanner.ui.state import current_pool, get_journal, get_universe_items, save_pool, set_journal
 
 log = logging.getLogger(__name__)
-
-
-class _ListHandler(logging.Handler):
-    def __init__(self, buf):
-        super().__init__()
-        self.buf = buf
-
-    def emit(self, record):
-        self.buf.append(self.format(record))
 
 
 def scope_items(sb, cfg):
@@ -53,9 +45,6 @@ def pool_coverage(sb):
     return len(items), len(missing)
 
 
-PRICE_STALE_MIN = 20     # 按「開始掃描」時，資料池的現價超過這麼久就重抓現價
-
-
 def _pool_age_min():
     p = st.session_state.get("data_pool") or {}
     try:
@@ -66,84 +55,139 @@ def _pool_age_min():
     return (now.hour * 60 + now.minute) - (h * 60 + m)
 
 
-def execute_scan(sb, fresh_prices=True):
+@st.cache_resource
+def scan_runner():
+    """整個 App 共用一個背景執行器：掃描在伺服器的執行緒裡跑，換頁、重畫都不會中斷。"""
+    return JobRunner()
+
+
+def scan_running():
+    return scan_runner().running()
+
+
+def _scan_inputs(sb, fresh_prices):
+    """在主執行緒把掃描需要的東西準備好（執行緒裡不能碰 session_state）。失敗回 (None, 訊息)。"""
+    cfg = build_cfg()
+    try:
+        items = scope_items(sb, cfg)
+    except Exception as e:
+        return None, f"讀取股票清單失敗：{e}"
+    if not items:
+        return None, "請先在「找標的」上方的範圍上傳清單，或改選「全台股」"
+    pool, age = current_pool(), _pool_age_min()
+    meta = {"cfg": cfg, "scope_key": scope_key(sb), "scope_label": scope_label(sb),
+            "mode": st.session_state.get("strategy_mode", "breakout"), "after_mode": sb.mode}
+    return (lambda cb=None: run_pool_scan(cfg, items, pool, age, fresh_prices, cb)), meta
+
+
+def start_scan(sb, fresh_prices=True):
     """
-    依目前範圍掃描，結果寫入 session_state。回傳是否成功。
-    今天已經下載過的股票直接用資料池（只補抓缺的）：先掃全台股，之後換「僅普通股」或上傳清單都不必重抓。
-    fresh_prices：使用者按下「開始掃描」時為 True — 沿用的資料若現價已舊（> 20 分鐘）就重抓現價；
-    換範圍自動重算時為 False，直接用池子裡的資料。
+    按「開始掃描」：在背景開始，馬上回來。換頁、重新整理都不會中斷；完成後由 apply_finished_scan 自動載入。
+    今天的資料池已經涵蓋範圍時只要幾秒，也一樣走這條路，行為一致。
     """
-    with st.status("掃描準備中 …", expanded=True) as status:
-        cfg = build_cfg()
-        try:
-            status.update(label="讀取範圍內的股票清單 …")
-            items = scope_items(sb, cfg)
-        except Exception as e:
-            status.update(label=f"讀取股票清單失敗：{e}", state="error")
-            return False
-        if not items:
-            status.update(label="請先在「找標的」上方的範圍上傳清單，或改選「全台股」", state="error")
-            return False
-
-        pool = current_pool()
-        sub, missing = split_by_pool(pool, items)
-        reused = len(items) - len(missing)
-        buf = []
-        handler = _ListHandler(buf)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
-        logging.getLogger().setLevel(logging.INFO)
-        logging.getLogger().addHandler(handler)
-        bar = st.progress(0.0)
-        log_box = st.empty()
-
-        def on_progress(stage, pct, msg):
-            status.update(label=f"{stage}：{msg}")
-            bar.progress(min(pct, 1.0))
-            log_box.caption("\n\n".join(buf[-4:]))
-
-        try:
-            if missing:
-                if reused:
-                    st.caption(f"範圍 {len(items)} 檔：{reused} 檔用今天已下載的資料，只下載 {len(missing)} 檔。")
-                part = run_scan(cfg=cfg, progress_cb=on_progress, items=missing)
-                pool = merge_pool(pool, part["scan_cache"])
-                save_pool(pool, now_tw().strftime("%H:%M"))
-                if reused:
-                    sub, _ = split_by_pool(pool, items)
-                    result = run_scan(cfg=cfg, cached=sub, progress_cb=on_progress)
-                else:
-                    result = part
-            else:
-                age = _pool_age_min()
-                if fresh_prices and (age is None or age > PRICE_STALE_MIN):
-                    status.update(label=f"更新 {len(sub['resolved'])} 檔現價（其他資料沿用今天已下載的）…")
-                    pool["price_map"] = {**pool.get("price_map", {}), **refresh_prices(sub, cfg)}
-                    save_pool(pool, now_tw().strftime("%H:%M"))
-                    sub, _ = split_by_pool(pool, items)
-                result = run_scan(cfg=cfg, cached=sub, progress_cb=on_progress)
-        except Exception as e:
-            status.update(label=f"掃描失敗：{e}", state="error")
-            st.exception(e)
-            return False
-        finally:
-            logging.getLogger().removeHandler(handler)
-
-        st.session_state["result"] = result
-        st.session_state["scan_cache"] = result.get("scan_cache")
-        st.session_state["cfg"] = cfg
-        st.session_state["_result_mode"] = st.session_state.get("strategy_mode", "breakout")
-        st.session_state["_result_scope"] = scope_key(sb)
-        st.session_state["_result_scope_label"] = scope_label(sb)
-        st.session_state["_result_reuse"] = {"total": len(items), "reused": reused, "downloaded": len(missing),
-                                             "data_at": (st.session_state.get("data_pool") or {}).get("at")}
-        st.session_state["last_scan_at"] = now_tw().strftime("%m/%d %H:%M")
-        _after_scan(result, sb.mode)
-        n = len(result["df"]) if result.get("df") is not None else 0
-        how = f"，{reused} 檔用已下載的資料" if reused else ""
-        status.update(label=f"掃描完成：{n} 檔，{result['elapsed_sec']:.0f} 秒{how}",
-                      state="complete", expanded=False)
-    st.toast(f"掃描完成：{n} 檔{how}")
+    run, meta = _scan_inputs(sb, fresh_prices)
+    if run is None:
+        st.error(meta)
+        return False
+    jid = scan_runner().start(f"掃描 {meta['scope_label']}", lambda cb: run(cb), meta=meta)
+    if jid is None:
+        st.toast("已經有一個掃描在進行中，完成後會自動載入")
+        return False
+    st.session_state["_scan_job_id"] = jid
+    st.session_state.pop("_scan_error", None)
     return True
+
+
+def execute_scan(sb, fresh_prices=False):
+    """前景重算（只用今天已下載的資料、幾秒內完成）：換範圍時自動用。需要下載的一律走 start_scan。"""
+    run, meta = _scan_inputs(sb, fresh_prices)
+    if run is None:
+        st.error(meta)
+        return False
+    with st.spinner("用今天已下載的資料重新計算 …"):
+        try:
+            out = run()
+        except Exception as e:
+            st.error(f"掃描失敗：{e}")
+            return False
+    _apply_scan(out, meta)
+    return True
+
+
+def _apply_scan(out, meta):
+    """把掃描結果寫進這個 session（只能在主執行緒呼叫）。"""
+    ss, result = st.session_state, out["result"]
+    if out["pool_changed"]:
+        save_pool(out["pool"], now_tw().strftime("%H:%M"))
+    ss["result"] = result
+    ss["_result_partial"] = False
+    ss["scan_cache"] = result.get("scan_cache")
+    ss["cfg"] = meta["cfg"]
+    ss["_result_mode"] = meta["mode"]
+    ss["_result_scope"] = meta["scope_key"]
+    ss["_result_scope_label"] = meta["scope_label"]
+    ss["_result_reuse"] = {"total": out["total"], "reused": out["reused"], "downloaded": out["downloaded"],
+                           "data_at": (ss.get("data_pool") or {}).get("at")}
+    ss["last_scan_at"] = now_tw().strftime("%m/%d %H:%M")
+    _after_scan(result, meta["after_mode"])
+    n = len(result["df"]) if result.get("df") is not None else 0
+    how = f"，{out['reused']} 檔用已下載的資料" if out["reused"] else ""
+    st.toast(f"掃描完成：{n} 檔{how}（{result['elapsed_sec']:.0f} 秒）")
+
+
+def apply_finished_scan():
+    """每次頁面執行開頭呼叫：這個 session 啟動的掃描完成了，就把結果載入。"""
+    ss, r = st.session_state, scan_runner()
+    snap = r.snapshot()
+    jid = ss.get("_scan_job_id")
+    if not jid or snap["id"] != jid or ss.get("_scan_job_applied") == jid:
+        return
+    if snap["state"] == "done" and snap["result"] is not None:
+        try:
+            _apply_scan(snap["result"], snap["meta"])
+        except Exception as e:
+            ss["_scan_error"] = f"掃描完成，但載入結果失敗：{e}"
+        ss["_scan_job_applied"] = jid
+        r.release(jid)
+    elif snap["state"] == "error":
+        ss["_scan_error"] = f"掃描失敗：{snap['error']}"
+        ss["_scan_job_applied"] = jid
+
+
+def _banner_poll():
+    snap = scan_runner().snapshot()
+    meta = snap.get("meta") or {}
+    sec = int(time.time() - (snap["started"] or time.time()))
+    st.progress(snap["pct"], text=f"背景掃描中 · {meta.get('scope_label', '')} · {snap['msg']}（{sec} 秒，可以切換頁面）")
+    if snap["state"] != "running":
+        st.rerun()                                   # 整頁重畫：apply_finished_scan 載入結果、橫幅消失
+
+
+_banner_live = st.fragment(run_every=2)(_banner_poll)
+
+
+def _adopt_job(jid):
+    st.session_state["_scan_job_id"] = jid
+    st.session_state.pop("_scan_job_applied", None)
+
+
+def render_scan_banner():
+    """所有頁面最上方：掃描進度、失敗訊息，或別個視窗啟動的掃描結果。"""
+    ss, r = st.session_state, scan_runner()
+    snap = r.snapshot()
+    if snap["state"] == "running":
+        _banner_live()
+        return
+    if ss.get("_scan_error"):
+        c1, c2 = st.columns([6, 1], vertical_alignment="center")
+        c1.error(ss["_scan_error"])
+        if c2.button("關閉", key="scan_err_close"):
+            ss.pop("_scan_error", None)
+            st.rerun()
+    elif snap["state"] == "done" and snap["result"] is not None and ss.get("_scan_job_id") != snap["id"]:
+        c1, c2 = st.columns([4, 1.4], vertical_alignment="center")
+        c1.caption(f"有一份剛完成的背景掃描（{(snap.get('meta') or {}).get('scope_label', '')}），不是這個視窗啟動的。")
+        c2.button("載入結果", key="scan_adopt", on_click=_adopt_job, args=(snap["id"],), use_container_width=True)
 
 
 def _after_scan(result, mode):
