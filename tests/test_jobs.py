@@ -143,15 +143,16 @@ def test_runner_reports_progress_and_result():
             time.sleep(0.005)
         return {"ok": 1}
 
-    assert r.start("測試", target)
-    snap = _wait(r, "running")
+    jid = r.start("測試", target, meta={"scope": "x"})
+    assert jid == 1
     deadline = time.time() + 2
     while r.snapshot()["pct"] < 0.4 and time.time() < deadline:
         time.sleep(0.01)
-    assert r.running() and r.snapshot()["msg"] == "下載中" and not r.start("另一個", lambda p: 1)   # 一次只跑一個
+    assert r.running() and r.snapshot()["msg"] == "下載中" and r.snapshot()["meta"] == {"scope": "x"}
+    assert r.start("另一個", lambda p: 1) is None                 # 一次只跑一個
     gate["go"] = 1
     snap = _wait(r, "done")
-    assert snap["result"] == {"ok": 1} and snap["pct"] == 1.0 and snap["finished"] >= snap["started"]
+    assert snap["result"] == {"ok": 1} and snap["pct"] == 1.0 and snap["id"] == 1
 
 
 def test_runner_captures_errors_and_can_restart():
@@ -163,7 +164,30 @@ def test_runner_captures_errors_and_can_restart():
     r.start("x", boom)
     snap = _wait(r, "error")
     assert "壞掉了" in snap["error"] and snap["result"] is None
-    assert r.start("y", lambda p: 7)
+    jid = r.start("y", lambda p: 7)
+    assert jid == 2                                               # id 遞增：session 靠它認得是不是自己的工作
     assert _wait(r, "done")["result"] == 7
-    r.clear()
-    assert r.snapshot()["state"] == "idle" and r.snapshot()["result"] is None
+
+
+def test_runner_release_drops_result_but_keeps_state():
+    r = JobRunner()
+    r.start("x", lambda p: {"big": list(range(10))})
+    _wait(r, "done")
+    r.release(99)                                                 # id 不符：不動
+    assert r.snapshot()["result"] is not None
+    r.release(1)
+    snap = r.snapshot()
+    assert snap["result"] is None and snap["state"] == "done" and snap["id"] == 1
+
+
+def test_runner_survives_the_caller_going_away():
+    """工作在自己的執行緒，不依賴呼叫端（換頁 = 呼叫端的 script 被中止）還活著。"""
+    r = JobRunner()
+
+    def target(progress):
+        time.sleep(0.05)
+        return "ok"
+
+    r.start("x", target)
+    del target
+    assert _wait(r, "done")["result"] == "ok"

@@ -152,12 +152,16 @@ def load_rulebook(owner):
 
 # ---------- App 內背景執行：同一個伺服器行程裡開一條執行緒，離開頁面也繼續跑 ----------
 class JobRunner:
-    """一次只跑一個工作。狀態用鎖保護，介面用 snapshot() 讀。"""
+    """一次只跑一個工作。狀態用鎖保護，介面用 snapshot() 讀；每個工作有遞增的 id，讓 session 認得是不是自己的。"""
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._state = {"state": "idle", "pct": 0.0, "msg": "", "started": None, "finished": None,
-                       "error": None, "result": None, "label": ""}
+        self._seq = 0
+        self._state = self._idle()
+
+    def _idle(self):
+        return {"id": self._seq, "state": "idle", "pct": 0.0, "msg": "", "started": None, "finished": None,
+                "error": None, "result": None, "label": "", "meta": None}
 
     def snapshot(self):
         with self._lock:
@@ -166,32 +170,38 @@ class JobRunner:
     def running(self):
         return self.snapshot()["state"] == "running"
 
-    def start(self, label, target):
-        """target(progress_cb) → 結果。已有工作在跑就不開新的，回 False。"""
+    def start(self, label, target, meta=None):
+        """target(progress_cb) → 結果。已有工作在跑就不開新的，回 None；否則回工作 id（≥ 1）。"""
         with self._lock:
             if self._state["state"] == "running":
-                return False
-            self._state = {"state": "running", "pct": 0.0, "msg": "準備中", "started": time.time(),
-                           "finished": None, "error": None, "result": None, "label": label}
+                return None
+            self._seq += 1
+            jid = self._seq
+            self._state = {"id": jid, "state": "running", "pct": 0.0, "msg": "準備中", "started": time.time(),
+                           "finished": None, "error": None, "result": None, "label": label, "meta": meta}
 
         def progress(pct, msg):
             with self._lock:
-                self._state["pct"], self._state["msg"] = min(1.0, float(pct)), str(msg)
+                if self._state["id"] == jid:
+                    self._state["pct"], self._state["msg"] = min(1.0, float(pct)), str(msg)
 
         def work():
             try:
                 res = target(progress)
                 with self._lock:
-                    self._state.update(state="done", pct=1.0, result=res, finished=time.time(), msg="完成")
+                    if self._state["id"] == jid:
+                        self._state.update(state="done", pct=1.0, result=res, finished=time.time(), msg="完成")
             except Exception as e:
                 log.exception("背景工作失敗")
                 with self._lock:
-                    self._state.update(state="error", error=str(e), finished=time.time())
+                    if self._state["id"] == jid:
+                        self._state.update(state="error", error=str(e), finished=time.time())
 
         threading.Thread(target=work, daemon=True, name="twscanner-job").start()
-        return True
+        return jid
 
-    def clear(self):
+    def release(self, jid=None):
+        """結果已被取走：丟掉大物件（掃描結果含全部 K 線），保留狀態。"""
         with self._lock:
-            if self._state["state"] != "running":
-                self._state = {**self._state, "state": "idle", "result": None, "error": None}
+            if self._state["state"] != "running" and (jid is None or jid == self._state["id"]):
+                self._state["result"] = None

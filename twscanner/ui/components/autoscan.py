@@ -1,9 +1,8 @@
 """
-背景掃描與排程結果（找標的頁、今日決策頁共用）。
+排程結果（找標的頁、今日決策頁共用）。
 
-- 排程：GitHub Actions 每個交易日收盤後掃描，把進場與觀察名單存到雲端；這裡讀回最新一份，不必等掃描。
-- 背景：按下後在伺服器上另開一條執行緒掃描，離開這一頁也會繼續；完成後按「載入結果」。
-兩者都需要雲端資料庫才能跨裝置；沒有雲端時，背景掃描的結果只留在伺服器記憶體裡（這個 App 重啟就沒了）。
+GitHub Actions 每個交易日收盤後掃描，把進場與觀察名單存到雲端；這裡讀回最新一份，不必等掃描。
+手動按「開始掃描」的背景執行在 twscanner/ui/actions.py（start_scan / apply_finished_scan / render_scan_banner）。
 """
 import time
 
@@ -12,15 +11,12 @@ import streamlit as st
 from twscanner.core.tz import now_tw
 from twscanner.services.jobs import (
     MODE_LABELS,
-    JobRunner,
     load_scan,
     payload_to_result,
-    run_scan_job,
     scan_key,
 )
 from twscanner.storage import cloud as store
-from twscanner.ui.state import cloud_owner, get_base_config
-from twscanner.ui.sync import SETTING_KEYS
+from twscanner.ui.state import cloud_owner
 
 CACHE_SEC = 60
 SETUP = """**設定自動排程（只要做一次，約 5 分鐘）**
@@ -32,12 +28,6 @@ SETUP = """**設定自動排程（只要做一次，約 5 分鐘）**
 4. 之後每個交易日台灣時間 15:40 自動執行。要改時間，編輯 `.github/workflows/scheduled-scan.yml` 裡的 `cron`（UTC，台灣 = UTC+8）。
 
 排程會同時算好三種策略與實證規則名單；執行失敗時 Actions 頁會顯示紅色叉叉（GitHub 預設也會寄通知信）。"""
-
-
-@st.cache_resource
-def runner():
-    """整個 App 共用一個背景執行器（同一時間只跑一個掃描）。"""
-    return JobRunner()
 
 
 def _fmt_at(iso):
@@ -91,61 +81,9 @@ def scheduled_panel():
               on_click=_load, args=(p,))
 
 
-def _start(sb):
-    """在主執行緒把需要的設定複製出來，再交給背景執行緒（執行緒裡不碰 session_state）。"""
-    ss = st.session_state
-    prefs = {k: ss[k] for k in SETTING_KEYS if k in ss}
-    modes = [ss.get("strategy_mode", "breakout")] + [m for m in MODE_LABELS if m != ss.get("strategy_mode")]
-    base, kind = get_base_config(), sb.universe_kind
-    save = store.is_enabled() and bool(cloud_owner())
-    owner = cloud_owner() or "me"
-    runner().start("背景掃描", lambda cb: run_scan_job(base, prefs, kind, modes, owner, with_rulebook=False,
-                                                       progress_cb=cb, save=save))
-
-
-def _poll():
-    snap = runner().snapshot()
-    st.progress(snap["pct"], text=f"{snap['msg']}（已跑 {int(time.time() - (snap['started'] or time.time()))} 秒）")
-    if snap["state"] != "running":
-        st.rerun()                                   # 完成 → 整頁重畫，換成「載入結果」
-
-
-_poll_live = st.fragment(run_every=2)(_poll)
-
-
-def _load_done(mode):
-    snap = runner().snapshot()
-    res = snap.get("result") or {}
-    p = res.get(mode) or next((v for k, v in res.items() if k in MODE_LABELS), None)
-    if p:
-        _load(p)
-
-
 def background_panel(sb):
-    """背景掃描（全台股範圍）。按下去可以離開這頁，回來看進度。"""
-    ss = st.session_state
-    r = runner()
-    snap = r.snapshot()
-    with st.expander("背景掃描與自動排程", expanded=snap["state"] == "running"):
-        if snap["state"] == "running":
-            _poll_live()
-            return
-        if snap["state"] == "error":
-            st.error(f"上次背景掃描失敗：{snap['error']}")
-        elif snap["state"] == "done":
-            mode = ss.get("strategy_mode", "breakout")
-            took = int((snap["finished"] or 0) - (snap["started"] or 0))
-            st.success(f"背景掃描完成（{took} 秒），三種策略都算好了。")
-            st.button(f"載入「{MODE_LABELS.get(mode, mode)}」結果", type="primary", key="job_load_done",
-                      on_click=_load_done, args=(mode,))
-        can = sb.mode == "掃描全台股"
-        c1, c2 = st.columns([1.3, 3], vertical_alignment="center")
-        if c1.button("在背景掃描", key="job_start", disabled=not can, use_container_width=True):
-            _start(sb)
-            st.rerun()
-        c2.caption("按下後可以離開這一頁，回來再看。會一次算好三種策略。" if can
-                   else "背景掃描只支援「全台股」範圍；上傳清單請用「開始掃描」。")
-        st.caption("結果存在雲端（有登入時），換手機或電腦也看得到；沒有雲端時只留在這個 App 的記憶體，App 重啟就沒了。")
+    """自動排程的設定說明（手動掃描本身就在背景執行，不需要另外的按鈕）。"""
+    with st.expander("自動排程設定", expanded=False):
         st.markdown(SETUP)
 
 

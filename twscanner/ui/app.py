@@ -14,6 +14,7 @@ import streamlit as st
 
 from twscanner import __version__
 from twscanner.ui import state, sync
+from twscanner.ui.actions import apply_finished_scan, render_scan_banner
 from twscanner.ui.components.header import render_page_header
 from twscanner.ui.pages import flows, holdings, learn, lookup, research, scan, settings_page, today
 from twscanner.ui.scan_controls import current_scan_state
@@ -55,6 +56,8 @@ def _page(url, title, module, needs_scan, *_):
     def run():
         sync.pull_changes()              # 別台裝置改過的先拉回來（畫 widget 之前；最多每 45 秒查一次版本）
         _tab_bar(url)
+        apply_finished_scan()            # 背景掃描完成了就載入（要在頁面畫出來之前，頁面才看得到新結果）
+        render_scan_banner()
         if url != "settings":            # 設定頁自己有標題，不需要市場狀態
             # 今日決策與找標的的結論句已經講了大盤怎麼做，頁首就不重複那句建議
             render_page_header(title, advice=url not in ("today", "scan"))
